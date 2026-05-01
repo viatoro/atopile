@@ -1,0 +1,23 @@
+"""pinout-view - A new atopile project"""
+
+import ElectricPower
+
+from "atopile/espressif-esp32-s3/espressif-esp32-s3.ato" import Espressif_ESP32_S3
+from "atopile/st-stm32h723/st-stm32h723.ato" import ST_STM32H723
+from "atopile/microchip-mcp9808/microchip-mcp9808.ato" import Microchip_MCP9808
+
+module App:
+    ic = new Espressif_ESP32_S3
+    i2c_sensor = new Microchip_MCP9808
+
+    power_3v3 = new ElectricPower
+    power_3v3 ~ ic.power
+
+    ic.i2c ~ i2c_sensor.i2c
+    power_3v3 ~ i2c_sensor.power
+
+module STM32:
+    ic = new ST_STM32H723
+
+    power_3v3 = new ElectricPower
+    ic.power_3v3 ~ power_3v3

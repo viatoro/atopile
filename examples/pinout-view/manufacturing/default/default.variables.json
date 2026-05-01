@@ -1,0 +1,77 @@
+{
+  "version": "1.0",
+  "build_id": "79df56527108849a",
+  "nodes": [
+    {
+      "name": "i2c_sensor",
+      "type": "module",
+      "path": "i2c_sensor",
+      "typeName": "Microchip_MCP9808",
+      "variables": [],
+      "children": [
+        {
+          "name": "addressor",
+          "type": "module",
+          "path": "i2c_sensor.addressor",
+          "typeName": "Addressor<address_bits=3>",
+          "variables": [
+            {
+              "name": "address",
+              "spec": "\u211d+",
+              "specTolerance": null,
+              "actual": null,
+              "actualTolerance": null,
+              "unit": null,
+              "type": "dimensionless",
+              "meetsSpec": null,
+              "source": "picked"
+            },
+            {
+              "name": "base",
+              "spec": "24",
+              "specTolerance": null,
+              "actual": null,
+              "actualTolerance": null,
+              "unit": null,
+              "type": "dimensionless",
+              "meetsSpec": null,
+              "source": "picked"
+            },
+            {
+              "name": "offset",
+              "spec": "0",
+              "specTolerance": null,
+              "actual": null,
+              "actualTolerance": null,
+              "unit": null,
+              "type": "dimensionless",
+              "meetsSpec": null,
+              "source": "picked"
+            }
+          ],
+          "children": []
+        },
+        {
+          "name": "i2c",
+          "type": "interface",
+          "path": "i2c_sensor.i2c",
+          "typeName": "I2C",
+          "variables": [
+            {
+              "name": "address",
+              "spec": "24",
+              "specTolerance": null,
+              "actual": null,
+              "actualTolerance": null,
+              "unit": null,
+              "type": "dimensionless",
+              "meetsSpec": null,
+              "source": "derived"
+            }
+          ],
+          "children": []
+        }
+      ]
+    }
+  ]
+}

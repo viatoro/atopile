@@ -1,0 +1,262 @@
+{
+  "version": "1.0",
+  "build_id": "79df56527108849a",
+  "components": [
+    {
+      "id": "c25744",
+      "lcsc": "C25744",
+      "manufacturer": "UNI-ROYAL(Uniroyal Elec)",
+      "mpn": "0402WGF1002TCE",
+      "type": "resistor",
+      "value": "10k\u03a9 \u00b11% 62.5mW 50V",
+      "package": "UNI_ROYAL_0402WGF1002TCE:R0402",
+      "description": "",
+      "quantity": 5,
+      "unitCost": 0.000257143,
+      "stock": 20674699,
+      "isBasic": true,
+      "isPreferred": false,
+      "source": "specified",
+      "datasheet": "https://www.lcsc.com/datasheet/lcsc_datasheet_2411221126_UNI-ROYAL-Uniroyal-Elec-0402WGF1002TCE_C25744.pdf",
+      "parameters": [
+        {
+          "name": "resistance",
+          "value": "10k\u03a9 \u00b11%",
+          "unit": null
+        },
+        {
+          "name": "max_power",
+          "value": "62.5mW",
+          "unit": null
+        },
+        {
+          "name": "max_voltage",
+          "value": "50V",
+          "unit": null
+        }
+      ],
+      "usages": [
+        {
+          "address": "main.ato::App.i2c_sensor|atopile/microchip-mcp9808/microchip-mcp9808.ato::Microchip_MCP9808.alert_pullup|Resistor",
+          "designator": "R1"
+        },
+        {
+          "address": "main.ato::App.i2c_sensor|atopile/microchip-mcp9808/microchip-mcp9808.ato::Microchip_MCP9808.i2c_pullups[0]|Resistor",
+          "designator": "R2"
+        },
+        {
+          "address": "main.ato::App.i2c_sensor|atopile/microchip-mcp9808/microchip-mcp9808.ato::Microchip_MCP9808.i2c_pullups[1]|Resistor",
+          "designator": "R3"
+        },
+        {
+          "address": "main.ato::App.ic|elec/espressif-esp32-s3/espressif-esp32-s3.ato::Espressif_ESP32_S3.boot_pullup_resistor|Resistor",
+          "designator": "R4"
+        },
+        {
+          "address": "main.ato::App.ic|elec/espressif-esp32-s3/espressif-esp32-s3.ato::Espressif_ESP32_S3.r_en|Resistor",
+          "designator": "R5"
+        }
+      ]
+    },
+    {
+      "id": "c139797",
+      "lcsc": "C139797",
+      "manufacturer": "ALPSALPINE",
+      "mpn": "SKRPACE010",
+      "type": "switch",
+      "value": "",
+      "package": "ALPSALPINE_SKRPACE010:KEY-SMD_4P-L4.2-W3.2-P2.20-LS4.6",
+      "description": null,
+      "quantity": 2,
+      "unitCost": null,
+      "stock": null,
+      "isBasic": null,
+      "isPreferred": null,
+      "source": "manual",
+      "datasheet": null,
+      "parameters": [],
+      "usages": [
+        {
+          "address": "main.ato::App.ic|elec/espressif-esp32-s3/espressif-esp32-s3.ato::Espressif_ESP32_S3.boot_switch|atopile/buttons/buttons.ato::VerticalButton.package|parts/ALPSALPINE_SKRPACE010/ALPSALPINE_SKRPACE010.ato::ALPSALPINE_SKRPACE010_package",
+          "designator": "SW1"
+        },
+        {
+          "address": "main.ato::App.ic|elec/espressif-esp32-s3/espressif-esp32-s3.ato::Espressif_ESP32_S3.reset_switch|atopile/buttons/buttons.ato::VerticalButton.package|parts/ALPSALPINE_SKRPACE010/ALPSALPINE_SKRPACE010.ato::ALPSALPINE_SKRPACE010_package",
+          "designator": "SW2"
+        }
+      ]
+    },
+    {
+      "id": "c1525",
+      "lcsc": "C1525",
+      "manufacturer": "Samsung Electro-Mechanics",
+      "mpn": "CL05B104KO5NNNC",
+      "type": "capacitor",
+      "value": "100nF \u00b110% 16V X7R",
+      "package": "Samsung_Electro_Mechanics_CL05B104KO5NNNC:C0402",
+      "description": "",
+      "quantity": 2,
+      "unitCost": 0.000585714,
+      "stock": 54323629,
+      "isBasic": true,
+      "isPreferred": false,
+      "source": "specified",
+      "datasheet": "https://www.lcsc.com/datasheet/lcsc_datasheet_2304140030_Samsung-Electro-Mechanics-CL05B104KO5NNNC_C1525.pdf",
+      "parameters": [
+        {
+          "name": "capacitance",
+          "value": "90-110nF",
+          "unit": null
+        },
+        {
+          "name": "max_voltage",
+          "value": "16V",
+          "unit": null
+        },
+        {
+          "name": "temperature_coefficient",
+          "value": "X7R",
+          "unit": null
+        }
+      ],
+      "usages": [
+        {
+          "address": "main.ato::App.i2c_sensor|atopile/microchip-mcp9808/microchip-mcp9808.ato::Microchip_MCP9808.vdd_cap|Capacitor",
+          "designator": "C1"
+        },
+        {
+          "address": "main.ato::App.ic|elec/espressif-esp32-s3/espressif-esp32-s3.ato::Espressif_ESP32_S3.c_decoupling|Capacitor",
+          "designator": "C3"
+        }
+      ]
+    },
+    {
+      "id": "c15850",
+      "lcsc": "C15850",
+      "manufacturer": "Samsung Electro-Mechanics",
+      "mpn": "CL21A106KAYNNNE",
+      "type": "capacitor",
+      "value": "10\u00b5F \u00b110% 25V X5R",
+      "package": "Samsung_Electro_Mechanics_CL21A106KAYNNNE:C0805",
+      "description": "",
+      "quantity": 1,
+      "unitCost": 0.0045,
+      "stock": 12668317,
+      "isBasic": true,
+      "isPreferred": false,
+      "source": "specified",
+      "datasheet": "https://www.lcsc.com/datasheet/lcsc_datasheet_2304140030_Samsung-Electro-Mechanics-CL21A106KAYNNNE_C15850.pdf",
+      "parameters": [
+        {
+          "name": "capacitance",
+          "value": "9-11\u00b5F",
+          "unit": null
+        },
+        {
+          "name": "max_voltage",
+          "value": "25V",
+          "unit": null
+        },
+        {
+          "name": "temperature_coefficient",
+          "value": "X5R",
+          "unit": null
+        }
+      ],
+      "usages": [
+        {
+          "address": "main.ato::App.ic|elec/espressif-esp32-s3/espressif-esp32-s3.ato::Espressif_ESP32_S3.c_bulk|Capacitor",
+          "designator": "C2"
+        }
+      ]
+    },
+    {
+      "id": "c2913202",
+      "lcsc": "C2913202",
+      "manufacturer": "Espressif Systems",
+      "mpn": "ESP32-S3-WROOM-1-N16R8",
+      "type": "ic",
+      "value": "",
+      "package": "Espressif_Systems_ESP32_S3_WROOM_1_N16R8:WIRELM-SMD_ESP32-S3-WROOM-1",
+      "description": null,
+      "quantity": 1,
+      "unitCost": null,
+      "stock": null,
+      "isBasic": null,
+      "isPreferred": null,
+      "source": "manual",
+      "datasheet": null,
+      "parameters": [],
+      "usages": [
+        {
+          "address": "main.ato::App.ic|elec/espressif-esp32-s3/espressif-esp32-s3.ato::Espressif_ESP32_S3.ic|parts/Espressif_Systems_ESP32_S3_WROOM_1_N16R8/Espressif_Systems_ESP32_S3_WROOM_1_N16R8.ato::Espressif_Systems_ESP32_S3_WROOM_1_N16R8_package",
+          "designator": "U2"
+        }
+      ]
+    },
+    {
+      "id": "c52923",
+      "lcsc": "C52923",
+      "manufacturer": "Samsung Electro-Mechanics",
+      "mpn": "CL05A105KA5NQNC",
+      "type": "capacitor",
+      "value": "1\u00b5F \u00b110% 25V X5R",
+      "package": "Samsung_Electro_Mechanics_CL05A105KA5NQNC:C0402",
+      "description": "",
+      "quantity": 1,
+      "unitCost": 0.001285714,
+      "stock": 14528955,
+      "isBasic": true,
+      "isPreferred": false,
+      "source": "specified",
+      "datasheet": "https://www.lcsc.com/datasheet/lcsc_datasheet_2304140030_Samsung-Electro-Mechanics-CL05A105KA5NQNC_C52923.pdf",
+      "parameters": [
+        {
+          "name": "capacitance",
+          "value": "1\u00b5F \u00b110%",
+          "unit": null
+        },
+        {
+          "name": "max_voltage",
+          "value": "25V",
+          "unit": null
+        },
+        {
+          "name": "temperature_coefficient",
+          "value": "X5R",
+          "unit": null
+        }
+      ],
+      "usages": [
+        {
+          "address": "main.ato::App.ic|elec/espressif-esp32-s3/espressif-esp32-s3.ato::Espressif_ESP32_S3.c_en|Capacitor",
+          "designator": "C4"
+        }
+      ]
+    },
+    {
+      "id": "c94847",
+      "lcsc": "C94847",
+      "manufacturer": "Microchip Tech",
+      "mpn": "MCP9808-E/MS",
+      "type": "ic",
+      "value": "",
+      "package": "Microchip_Tech_MCP9808_E_MS:MSOP-8_L3.0-W3.0-P0.65-LS4.9-BL",
+      "description": null,
+      "quantity": 1,
+      "unitCost": null,
+      "stock": null,
+      "isBasic": null,
+      "isPreferred": null,
+      "source": "manual",
+      "datasheet": "https://lcsc.com/datasheet/lcsc_datasheet_1810010517_Microchip-Tech-MCP9808-E-MS_C94847.pdf",
+      "parameters": [],
+      "usages": [
+        {
+          "address": "main.ato::App.i2c_sensor|atopile/microchip-mcp9808/microchip-mcp9808.ato::Microchip_MCP9808.package|parts/Microchip_Tech_MCP9808_E_MS/Microchip_Tech_MCP9808_E_MS.ato::Microchip_Tech_MCP9808_E_MS_package",
+          "designator": "U1"
+        }
+      ]
+    }
+  ]
+}

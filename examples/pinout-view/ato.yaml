@@ -1,0 +1,21 @@
+requires-atopile: ^0.14.1005
+
+paths:
+  src: ./
+  layout: ./layout
+
+builds:
+  default:
+    entry: main.ato:App
+  stm32:
+    entry: main.ato:STM32
+dependencies:
+- type: registry
+  identifier: atopile/espressif-esp32-s3
+  release: 0.3.0
+- type: registry
+  identifier: atopile/st-stm32h723
+  release: 0.2.0
+- type: registry
+  identifier: atopile/microchip-mcp9808
+  release: 0.2.0
