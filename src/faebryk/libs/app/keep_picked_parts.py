@@ -211,7 +211,7 @@ def load_part_info_from_pcb(
 
             try:
                 param_value = json.loads(prop.value)
-            except (json.JSONDecodeError, TypeError):
+            except json.JSONDecodeError, TypeError:
                 logger.debug(f"Failed to parse PARAM_{param_name} value: {prop.value}")
                 continue
 
@@ -339,12 +339,13 @@ def test_pcb_constraint_conflict_detection():
     """
     import pytest
 
-    from faebryk.core.solver.solver import Solver
+    from faebryk.core.solver import Solver
     from faebryk.core.solver.utils import Contradiction
     from faebryk.libs.test.boundexpressions import BoundExpressions
 
     E = BoundExpressions()
     p0 = E.parameter_op(units=E.U.Ohm)
+    p0_param = p0.as_parameter_operatable.force_get().as_parameter.force_get()
 
     # Design constraint: param is subset of [8k, 12k]
     E.is_subset(p0, E.lit_op_range(((8000, E.U.Ohm), (12000, E.U.Ohm))), assert_=True)
@@ -355,7 +356,7 @@ def test_pcb_constraint_conflict_detection():
 
     solver = Solver()
     with pytest.raises(Contradiction):
-        solver.simplify(E.tg, E.g)
+        solver.simplify_for(p0_param)
 
 
 def test_pcb_constraint_compatible():
@@ -368,11 +369,12 @@ def test_pcb_constraint_compatible():
 
     Expected: No contradiction, since [8k, 12k] contains [9.9k, 10.1k].
     """
-    from faebryk.core.solver.solver import Solver
+    from faebryk.core.solver import Solver
     from faebryk.libs.test.boundexpressions import BoundExpressions
 
     E = BoundExpressions()
     p0 = E.parameter_op(units=E.U.Ohm)
+    p0_param = p0.as_parameter_operatable.force_get().as_parameter.force_get()
 
     # Design constraint: param is subset of [8k, 12k]
     E.is_subset(p0, E.lit_op_range(((8000, E.U.Ohm), (12000, E.U.Ohm))), assert_=True)
@@ -383,4 +385,4 @@ def test_pcb_constraint_compatible():
 
     solver = Solver()
     # Should NOT raise Contradiction
-    solver.simplify(E.tg, E.g)
+    solver.simplify_for(p0_param)

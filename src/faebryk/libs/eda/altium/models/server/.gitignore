@@ -1,0 +1,4 @@
+# Cached OAuth/servicediscovery session written by `cli.py login`.
+# Contains the short AFSSessionID and the OIDC JWT — never commit.
+.auth-token.json
+*.har

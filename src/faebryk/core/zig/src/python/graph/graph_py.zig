@@ -2,6 +2,7 @@ const std = @import("std");
 const graph = @import("graph");
 const visitor = graph.visitor;
 const pyzig = @import("pyzig");
+const cast = pyzig.cast;
 
 const py = pyzig.pybindings;
 const bind = pyzig.pyzig;
@@ -117,7 +118,7 @@ pub const BoundEdgeVisitor = struct {
     had_error: bool = false,
 
     pub fn call(ctx_ptr: *anyopaque, bound_edge: graph.graph.BoundEdgeReference) VisitResultVoid {
-        const ctx: *@This() = @ptrCast(@alignCast(ctx_ptr));
+        const ctx = cast.ctx(@This(), ctx_ptr);
 
         const edge_obj = makeBoundEdgePyObject(bound_edge) orelse {
             ctx.had_error = true;
@@ -176,7 +177,7 @@ pub var bfs_path_type: ?*py.PyTypeObject = null;
 const Literal = graph.graph.Literal;
 
 fn bound_node_dealloc(self: *py.PyObject) callconv(.c) void {
-    const wrapper = @as(*BoundNodeWrapper, @ptrCast(@alignCast(self)));
+    const wrapper = cast.ctx(BoundNodeWrapper, self);
     // Only free if this payload was allocated by makeBoundNodePyObject().
     const owned: *OwnedBoundNodePayload = @fieldParentPtr("payload", wrapper.data);
     if (owned.magic == owned_magic_bound_node) {
@@ -194,7 +195,7 @@ fn bound_node_dealloc(self: *py.PyObject) callconv(.c) void {
 }
 
 fn bound_edge_dealloc(self: *py.PyObject) callconv(.c) void {
-    const wrapper = @as(*BoundEdgeWrapper, @ptrCast(@alignCast(self)));
+    const wrapper = cast.ctx(BoundEdgeWrapper, self);
     // Only free if this payload was allocated by makeBoundEdgePyObject().
     const owned: *OwnedBoundEdgePayload = @fieldParentPtr("payload", wrapper.data);
     if (owned.magic == owned_magic_bound_edge) {
@@ -212,7 +213,7 @@ fn bound_edge_dealloc(self: *py.PyObject) callconv(.c) void {
 }
 
 fn node_dealloc(self: *py.PyObject) callconv(.c) void {
-    const wrapper = @as(*NodeWrapper, @ptrCast(@alignCast(self)));
+    const wrapper = cast.ctx(NodeWrapper, self);
     // Only free if this payload was allocated by makeNodePyObject().
     const owned: *OwnedNodePayload = @alignCast(@fieldParentPtr("payload", wrapper.data));
     if (owned.magic == owned_magic_node) {
@@ -230,7 +231,7 @@ fn node_dealloc(self: *py.PyObject) callconv(.c) void {
 }
 
 fn edge_dealloc(self: *py.PyObject) callconv(.c) void {
-    const wrapper = @as(*EdgeWrapper, @ptrCast(@alignCast(self)));
+    const wrapper = cast.ctx(EdgeWrapper, self);
     // Only free if this payload was allocated by makeEdgePyObject().
     const owned: *OwnedEdgePayload = @alignCast(@fieldParentPtr("payload", wrapper.data));
     if (owned.magic == owned_magic_edge) {
@@ -391,7 +392,7 @@ fn nodeAttributesToPyDict(node: graph.graph.NodeReference) ?*py.PyObject {
         had_error: bool = false,
 
         pub fn visit(ctx_ptr: *anyopaque, key: []const u8, literal: Literal, _: bool) void {
-            const ctx: *@This() = @ptrCast(@alignCast(ctx_ptr));
+            const ctx = cast.ctx(@This(), ctx_ptr);
             if (ctx.had_error) return;
 
             const key_ptr: [*c]const u8 = if (key.len == 0)
@@ -477,7 +478,7 @@ fn wrap_node_get_dynamic_attrs() type {
                 map: std.StringHashMap(Literal),
 
                 pub fn visit(ctx_ptr: *anyopaque, key: []const u8, literal: Literal, dynamic: bool) void {
-                    const ctx: *@This() = @ptrCast(@alignCast(ctx_ptr));
+                    const ctx = cast.ctx(@This(), ctx_ptr);
                     if (!dynamic) return;
                     ctx.map.put(key, literal) catch @panic("OOM dynamic attributes put");
                 }
@@ -874,7 +875,7 @@ fn wrap_bound_node_visit_edges_of_type() type {
 }
 
 fn bound_node_hash(self: *py.PyObject) callconv(.c) isize {
-    const wrapper = @as(*BoundNodeWrapper, @ptrCast(@alignCast(self)));
+    const wrapper = cast.ctx(BoundNodeWrapper, self);
     const bound_node = wrapper.data;
     // Node UUIDs are globally unique (counter-assigned), so graph identity is not needed.
     // Including graph identity would break after insert_subgraph merges graphs.
@@ -882,7 +883,7 @@ fn bound_node_hash(self: *py.PyObject) callconv(.c) isize {
 }
 
 fn bound_node_repr(self: *py.PyObject) callconv(.c) ?*py.PyObject {
-    const wrapper = @as(*BoundNodeWrapper, @ptrCast(@alignCast(self)));
+    const wrapper = cast.ctx(BoundNodeWrapper, self);
     const bound_node = wrapper.data;
 
     var buf: [128]u8 = undefined;
@@ -903,7 +904,7 @@ fn bound_node_richcompare(self: *py.PyObject, other: *py.PyObject, op: c_int) ca
         return py.Py_NotImplemented();
     }
 
-    const self_wrapper = @as(*BoundNodeWrapper, @ptrCast(@alignCast(self)));
+    const self_wrapper = cast.ctx(BoundNodeWrapper, self);
 
     // Check if other is also a BoundNodeReference
     if (py.Py_TYPE(other) != py.Py_TYPE(self)) {
@@ -912,7 +913,7 @@ fn bound_node_richcompare(self: *py.PyObject, other: *py.PyObject, op: c_int) ca
         return result;
     }
 
-    const other_wrapper = @as(*BoundNodeWrapper, @ptrCast(@alignCast(other)));
+    const other_wrapper = cast.ctx(BoundNodeWrapper, other);
 
     // Compare node identity only — UUIDs are globally unique
     const same = self_wrapper.data.node.is_same(other_wrapper.data.node);
@@ -1077,7 +1078,7 @@ fn wrap_bound_edge_get_graph() type {
 }
 
 fn bound_edge_repr(self: *py.PyObject) callconv(.c) ?*py.PyObject {
-    const wrapper = @as(*BoundEdgeWrapper, @ptrCast(@alignCast(self)));
+    const wrapper = cast.ctx(BoundEdgeWrapper, self);
     const bound_edge = wrapper.data;
 
     var buf: [128]u8 = undefined;
@@ -1192,7 +1193,7 @@ fn wrap_bfs_path_get_edges() type {
 }
 
 fn bfs_path_dealloc(self: *py.PyObject) callconv(.c) void {
-    const wrapper = @as(*BFSPathWrapper, @ptrCast(@alignCast(self)));
+    const wrapper = cast.ctx(BFSPathWrapper, self);
     const path = wrapper.data;
 
     // Clean up the BFSPath

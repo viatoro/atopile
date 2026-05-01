@@ -13,7 +13,7 @@ class DifferentialPair(fabll.Node):
     p = F.ElectricSignal.MakeChild()
     n = F.ElectricSignal.MakeChild()
 
-    impedance = F.Parameters.NumericParameter.MakeChild(unit=F.Units.Ohm)
+    differential_impedance = F.Parameters.NumericParameter.MakeChild(unit=F.Units.Ohm)
 
     # ----------------------------------------
     #                 traits
@@ -22,6 +22,13 @@ class DifferentialPair(fabll.Node):
     _single_electric_reference = fabll.Traits.MakeEdge(
         F.has_single_electric_reference.MakeChild()
     )
+
+    bus_parameters = [
+        fabll.Traits.MakeEdge(
+            F.is_alias_bus_parameter.MakeChild(),
+            owner=[differential_impedance],
+        ),
+    ]
 
     net_name_suffixes = [
         fabll.Traits.MakeEdge(
@@ -46,7 +53,7 @@ class DifferentialPair(fabll.Node):
         for r in rs:
             F.Expressions.IsSubset.c(
                 subset=r.resistance.get().can_be_operand.get(),
-                superset=self.impedance.get().can_be_operand.get(),
+                superset=self.differential_impedance.get().can_be_operand.get(),
                 assert_=True,
             )
 
@@ -62,7 +69,7 @@ class DifferentialPair(fabll.Node):
         import DifferentialPair, ElectricPower
 
         diff_pair = new DifferentialPair
-        diff_pair.impedance = 100ohm +/- 10%  # Common for high-speed signals
+        diff_pair.differential_impedance = 100ohm +/- 10%
 
         # Connect power reference for signal levels
         power_3v3 = new ElectricPower
@@ -80,7 +87,7 @@ class DifferentialPair(fabll.Node):
 
         # Common applications: USB, Ethernet, PCIe, HDMI
         usb_dp_dn = new DifferentialPair
-        usb_dp_dn.impedance = 90ohm +/- 10%
+        usb_dp_dn.differential_impedance = 90ohm +/- 10%
         """,
             language=F.has_usage_example.Language.ato,
         ).put_on_type()

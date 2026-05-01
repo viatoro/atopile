@@ -28,14 +28,24 @@ class Ethernet(fabll.Node):
     #                 traits
     # ----------------------------------------
     _is_interface = fabll.Traits.MakeEdge(fabll.is_interface.MakeChild())
+    is_data_interface = fabll.Traits.MakeEdge(
+        F.DataInterface.is_data_interface.MakeChild()
+    )
 
     _single_electric_reference = fabll.Traits.MakeEdge(
         F.has_single_electric_reference.MakeChild()
     )
 
-    # ----------------------------------------
-    #                WIP
-    # ----------------------------------------
+    # IEEE 802.3: 1000BASE-T differential impedance 100 Ohm +/- 15%
+    _parameter_constraints = [
+        F.Literals.Numbers.MakeChild_SetSuperset(
+            [pair, F.DifferentialPair.differential_impedance],
+            85.0,
+            115.0,
+            unit=F.Units.Ohm,
+        )
+        for pair in pairs
+    ]
 
     net_names = [
         fabll.Traits.MakeEdge(

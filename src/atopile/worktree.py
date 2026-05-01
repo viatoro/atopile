@@ -3,10 +3,16 @@
 Python rewrite of scripts/worktree_fast.sh.
 """
 
+import os
 import re
 import shutil
 import subprocess
 from pathlib import Path
+
+from faebryk.libs.git import git_root
+from faebryk.libs.util import app_root
+
+DEFAULT_BRANCH_PREFIX = "feature/"
 
 
 def _log(msg: str) -> None:
@@ -95,7 +101,7 @@ def _rewrite_venv_paths(source_root: Path, worktree_path: Path) -> None:
                 if b"\x00" in data[:512]:
                     continue
                 text = data.decode("utf-8", errors="strict")
-            except (UnicodeDecodeError, OSError):
+            except UnicodeDecodeError, OSError:
                 continue
             if source_str in text:
                 script.write_text(text.replace(source_str, dest_str))
@@ -124,6 +130,13 @@ def _remote_branch_exists(
     the network call with a timeout so worktree creation does not hang indefinitely
     on unreachable remotes.
     """
+    env = {
+        **os.environ,
+        # Never block the CLI on an interactive credential prompt while probing
+        # whether an origin branch exists.
+        "GIT_TERMINAL_PROMPT": "0",
+        "GCM_INTERACTIVE": "Never",
+    }
     try:
         result = subprocess.run(
             [
@@ -137,6 +150,7 @@ def _remote_branch_exists(
                 f"refs/heads/{branch_name}",
             ],
             capture_output=True,
+            env=env,
             timeout=timeout_seconds,
         )
     except subprocess.TimeoutExpired:
@@ -158,42 +172,47 @@ def create_worktree(
     skip_editable_install: bool = False,
 ) -> Path:
     """Create a fast development worktree with cloned .venv and Zig artifacts."""
-    # Resolve current repo root
-    result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-    )
-    current_root = result.stdout.strip() if result.returncode == 0 else ""
-    if not current_root:
-        raise RuntimeError("run this inside a git repository")
+    current_git_root = git_root()
+    source_app_root = app_root().resolve()
+    app_rel = source_app_root.relative_to(current_git_root)
 
-    current_root = Path(current_root)
-
-    # Resolve source root (main worktree)
+    # Resolve source roots (main worktree + app root inside it)
     if source_root is None:
-        source_root = _resolve_main_worktree(current_root)
-    source_root = source_root.resolve()
+        source_git_root = _resolve_main_worktree(current_git_root)
+        source_app_root = source_git_root / app_rel
+    else:
+        source_root = source_root.resolve()
+        if (source_root / "pyproject.toml").is_file():
+            source_app_root = source_root
+            source_git_root = git_root(source_root)
+        else:
+            source_git_root = source_root
+            source_app_root = source_git_root / app_rel
 
-    if not (source_root / ".git").exists():
-        raise RuntimeError(f"source root is not a git worktree: {source_root}")
-    if not (source_root / ".venv").is_dir():
-        raise RuntimeError(f"source root does not have .venv: {source_root / '.venv'}")
+    if not (source_git_root / ".git").exists():
+        raise RuntimeError(f"source root is not a git worktree: {source_git_root}")
+    if not (source_app_root / ".venv").is_dir():
+        raise RuntimeError(
+            f"source app root does not have .venv: {source_app_root / '.venv'}"
+        )
 
-    # Determine worktree path
+    # Determine worktree paths
     if path is None:
         if base_dir is None:
-            base_dir = source_root.parent
-        worktree_path = base_dir / f"{source_root.name}_{name_suffix}"
+            base_dir = source_git_root.parent
+        git_worktree_path = base_dir / f"{source_git_root.name}_{name_suffix}"
     else:
-        worktree_path = path
+        git_worktree_path = path
 
-    if worktree_path.exists():
-        raise RuntimeError(f"target worktree path already exists: {worktree_path}")
+    worktree_path = git_worktree_path / app_rel
 
-    _log(f"main worktree: {source_root}")
+    if git_worktree_path.exists():
+        raise RuntimeError(f"target worktree path already exists: {git_worktree_path}")
+
+    _log(f"main worktree: {source_git_root}")
+    _log(f"app root:      {source_app_root}")
     _log(f"new worktree:  {worktree_path}")
-    resolved_branch_name = branch_name or name_suffix
+    resolved_branch_name = branch_name or f"{DEFAULT_BRANCH_PREFIX}{name_suffix}"
     _log(f"branch:        {resolved_branch_name}")
     _log(f"start point:   {start_point}")
 
@@ -203,7 +222,7 @@ def create_worktree(
             [
                 "git",
                 "-C",
-                str(source_root),
+                str(source_git_root),
                 "show-ref",
                 "--verify",
                 "--quiet",
@@ -225,16 +244,18 @@ def create_worktree(
             [
                 "git",
                 "-C",
-                str(source_root),
+                str(source_git_root),
                 "worktree",
                 "add",
-                str(worktree_path),
+                str(git_worktree_path),
                 resolved_branch_name,
             ],
             check=True,
         )
     else:
-        branch_exists_remote = _remote_branch_exists(source_root, resolved_branch_name)
+        branch_exists_remote = _remote_branch_exists(
+            source_git_root, resolved_branch_name
+        )
 
     if not branch_exists_local and branch_exists_remote:
         _log(
@@ -245,13 +266,13 @@ def create_worktree(
             [
                 "git",
                 "-C",
-                str(source_root),
+                str(source_git_root),
                 "worktree",
                 "add",
                 "--track",
                 "-b",
                 resolved_branch_name,
-                str(worktree_path),
+                str(git_worktree_path),
                 f"origin/{resolved_branch_name}",
             ],
             check=True,
@@ -262,12 +283,12 @@ def create_worktree(
             [
                 "git",
                 "-C",
-                str(source_root),
+                str(source_git_root),
                 "worktree",
                 "add",
                 "-b",
                 resolved_branch_name,
-                str(worktree_path),
+                str(git_worktree_path),
                 start_point,
             ],
             check=True,
@@ -275,10 +296,10 @@ def create_worktree(
 
     # Clone .venv
     _log("cloning venv")
-    _clone_dir(source_root / ".venv", worktree_path / ".venv", force=force)
+    _clone_dir(source_app_root / ".venv", worktree_path / ".venv", force=force)
 
     # Clone zig-out if it exists
-    zig_out_src = source_root / "src" / "faebryk" / "core" / "zig" / "zig-out"
+    zig_out_src = source_app_root / "src" / "faebryk" / "core" / "zig" / "zig-out"
     if zig_out_src.is_dir():
         zig_out_dst = worktree_path / "src" / "faebryk" / "core" / "zig" / "zig-out"
         _clone_dir(zig_out_src, zig_out_dst, force=force)
@@ -301,8 +322,8 @@ def create_worktree(
 
     # Rewrite venv paths
     if not skip_editable_install:
-        _log(f"rewriting venv paths: {source_root} -> {worktree_path}")
-        _rewrite_venv_paths(source_root, worktree_path)
+        _log(f"rewriting venv paths: {source_app_root} -> {worktree_path}")
+        _rewrite_venv_paths(source_app_root, worktree_path)
     else:
         _log("skipping venv path rewrite (--skip-editable-install)")
 

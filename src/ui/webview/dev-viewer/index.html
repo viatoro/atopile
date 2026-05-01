@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>atopile — dev</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #1e1e2e; }
+    .dev-log-panel .lv-container { height: 100%; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    window.__ATOPILE_PANEL_ID__ = "sidebar";
+    window.__ATOPILE_LOGO_URL__ = "/logo.png";
+    window.__ATOPILE_LOGO_DARK_URL__ = "/logo-dark.svg";
+    window.__ATOPILE_LOGO_LIGHT_URL__ = "/logo-light.svg";
+  </script>
+  <script type="module" src="./dev.tsx"></script>
+</body>
+</html>

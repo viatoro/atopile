@@ -116,7 +116,7 @@ def _get_net_stable_key(net: F.Net) -> tuple[str, ...]:
         # fall back to an empty key which still sorts deterministically.
         return tuple()
 
-    stable_names = sorted(m.get_full_name(include_uuid=False) for m in mifs)
+    stable_names = sorted(m.get_full_name(include_root=False) for m in mifs)
     return tuple(stable_names)
 
 
@@ -130,7 +130,7 @@ def _collect_unnamed_nets(nets: Iterable[F.Net]) -> dict[F.Net, list[F.Electrica
     return dict(
         sorted(
             nets_with_interfaces.items(),
-            key=lambda it: [m.get_full_name(include_uuid=False) for m in it[1]],
+            key=lambda it: [m.get_full_name(include_root=False) for m in it[1]],
         )
     )
 
@@ -554,7 +554,7 @@ def _get_fallback_prefix(net: F.Net) -> str | None:
 
     # Try lowest common ancestor
     if lcn := fabll.Node.nearest_common_ancestor(*interfaces):
-        return lcn[0].get_full_name(include_uuid=False)
+        return lcn[0].get_full_name(include_root=False)
 
     return None
 
@@ -630,7 +630,7 @@ def _resolve_conflicts_with_lca(names: FuncDict[F.Net, _NetName]) -> None:
             lcn = fabll.Node.nearest_common_ancestor(*interfaces)
 
             if lcn:
-                lca_name = lcn[0].get_full_name(include_uuid=False)
+                lca_name = lcn[0].get_full_name(include_root=False)
 
                 # Strip the last component if it matches the base name to
                 # avoid duplication.
@@ -780,7 +780,7 @@ class TestNetNaming:
         # collect buses in a sorted manner
         buses = sorted(
             fabll.is_interface.group_into_buses(electricals),
-            key=lambda node: node.get_full_name(include_uuid=False),
+            key=lambda node: node.get_full_name(include_root=False),
         )
 
         # find or generate nets

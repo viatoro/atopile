@@ -9,12 +9,14 @@ import faebryk.core.node as fabll
 import faebryk.library._F as F
 from atopile.compiler.build import Linker, StdlibRegistry, build_file
 from faebryk.core.faebrykpy import EdgeComposition
-from faebryk.core.solver.solver import Solver
+from faebryk.core.solver import Solver
 from faebryk.libs.picker.picker import pick_parts_recursively
 from faebryk.libs.smd import SMDSize
 from faebryk.libs.test.boundexpressions import BoundExpressions
 from faebryk.libs.util import not_none
 from test.compiler.conftest import build_instance
+
+pytestmark = pytest.mark.easyeda
 
 E = BoundExpressions()
 
@@ -58,24 +60,62 @@ def test_ato_pick_capacitor():
             import Capacitor
 
             module A:
-                r1 = new Capacitor
-                r1.package = "C0402"
-                r1.capacitance = 100nF +/- 20%
+                cap = new Capacitor
+                cap.package = "C0402"
+                cap.capacitance = 100nF +/- 20%
+                cap.temperature_coefficient = "X7R"
             """,
         "A",
     )
 
-    r1 = F.Capacitor.bind_instance(_get_child(app_instance, "r1"))
+    cap = F.Capacitor.bind_instance(_get_child(app_instance, "cap"))
     assert (
-        r1.get_trait(F.has_package_requirements)
+        cap.get_trait(F.has_package_requirements)
         .size.get()
         .force_extract_singleton_typed(SMDSize)
         == SMDSize.I0402
     )
 
-    pick_parts_recursively(r1, Solver())
+    # Verify temperature_coefficient constraint was set
+    temp_coeff = cap.temperature_coefficient.get().try_extract_superset()
+    assert temp_coeff is not None
+    assert (
+        temp_coeff.get_single_value_typed(F.Capacitor.TemperatureCoefficient)
+        == F.Capacitor.TemperatureCoefficient.X7R
+    )
 
-    assert r1.has_trait(F.Pickable.has_part_picked)
+    pick_parts_recursively(cap, Solver())
+
+    assert cap.has_trait(F.Pickable.has_part_picked)
+
+
+@pytest.mark.usefixtures("setup_project_config")
+def test_ato_pick_capacitor_subtype():
+    _, _, _, result, app_instance = build_instance(
+        """
+            import Capacitor
+
+            module MyCapacitor from Capacitor:
+                package = "C0402"
+                capacitance = 100nF +/- 20%
+
+            module App:
+                cap = new MyCapacitor
+            """,
+        "App",
+    )
+
+    cap = F.Capacitor.bind_instance(_get_child(app_instance, "cap"))
+    assert (
+        cap.get_trait(F.has_package_requirements)
+        .size.get()
+        .force_extract_singleton_typed(SMDSize)
+        == SMDSize.I0402
+    )
+
+    pick_parts_recursively(cap, Solver())
+
+    assert cap.has_trait(F.Pickable.has_part_picked)
 
 
 @pytest.mark.usefixtures("setup_project_config")
@@ -132,6 +172,7 @@ def test_ato_pick_inductor(
     assert picked_inductance is not None, "Picked part should have inductance value"
 
 
+@pytest.mark.full_solver_only
 @pytest.mark.usefixtures("setup_project_config")
 def test_ato_pick_resistor_dependency(tmp_path: Path):
     child_path = tmp_path / "generics" / "resistors.ato"

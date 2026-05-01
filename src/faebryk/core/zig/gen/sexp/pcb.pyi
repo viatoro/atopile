@@ -102,10 +102,10 @@ class E_pad_property(str, Enum):
     NONE = "none"
 
 class E_pad_chamfer(str, Enum):
-    CHAMFER_TOP_LEFT = "chamfer_top_left"
-    CHAMFER_TOP_RIGHT = "chamfer_top_right"
-    CHAMFER_BOTTOM_LEFT = "chamfer_bottom_left"
-    CHAMFER_BOTTOM_RIGHT = "chamfer_bottom_right"
+    TOP_LEFT = "top_left"
+    TOP_RIGHT = "top_right"
+    BOTTOM_LEFT = "bottom_left"
+    BOTTOM_RIGHT = "bottom_right"
 
 class E_pad_drill_shape(str, Enum):
     CIRCLE = "circle"
@@ -213,6 +213,7 @@ class E_Attr(str, Enum):
     EXCLUDE_FROM_POS_FILES = "exclude_from_pos_files"
     EXCLUDE_FROM_BOM = "exclude_from_bom"
     ALLOW_MISSING_COURTYARD = "allow_missing_courtyard"
+    ALLOW_SOLDERMASK_BRIDGES = "allow_soldermask_bridges"
 
 class E_zone_fill_enable(str, Enum):
     YES = "yes"
@@ -612,6 +613,8 @@ class Pad:
     layers: list[str]
     remove_unused_layers: bool | None
     net: Net | None
+    pinfunction: str | None
+    pintype: str | None
     solder_mask_margin: float | None
     solder_paste_margin: float | None
     solder_paste_margin_ratio: float | None
@@ -621,7 +624,7 @@ class Pad:
     thermal_gap: float | None
     roundrect_rratio: float | None
     chamfer_ratio: float | None
-    chamfer: str | None
+    chamfer: list[str]
     properties: str | None
     options: PadOptions | None
     tenting: PadTenting | None
@@ -640,6 +643,8 @@ class Pad:
         layers: list[str],
         remove_unused_layers: bool | None,
         net: Net | None,
+        pinfunction: str | None,
+        pintype: str | None,
         solder_mask_margin: float | None,
         solder_paste_margin: float | None,
         solder_paste_margin_ratio: float | None,
@@ -649,7 +654,7 @@ class Pad:
         thermal_gap: float | None,
         roundrect_rratio: float | None,
         chamfer_ratio: float | None,
-        chamfer: str | None,
+        chamfer: list[str],
         properties: str | None,
         options: PadOptions | None,
         tenting: PadTenting | None,
@@ -674,9 +679,9 @@ class Net:
 class Property:
     name: str
     value: str
-    at: Xyr
+    at: Xyr | None
     unlocked: bool | None
-    layer: str
+    layer: str | None
     hide: bool | None
     uuid: str | None
     effects: Effects | None
@@ -686,9 +691,9 @@ class Property:
         *,
         name: str,
         value: str,
-        at: Xyr,
+        at: Xyr | None,
         unlocked: bool | None,
-        layer: str,
+        layer: str | None,
         hide: bool | None,
         uuid: str | None,
         effects: Effects | None,
@@ -726,7 +731,11 @@ class Footprint:
     layer: str
     uuid: str | None
     at: Xyr
+    description: str | None
+    tags: list[str]
     path: str | None
+    sheetname: str | None
+    sheetfile: str | None
     propertys: list[Property]
     attr: list[str]
     fp_lines: list[Line]
@@ -746,7 +755,11 @@ class Footprint:
         layer: str,
         uuid: str | None,
         at: Xyr,
+        description: str | None,
+        tags: list[str],
         path: str | None,
+        sheetname: str | None,
+        sheetfile: str | None,
         propertys: list[Property],
         attr: list[str],
         fp_lines: list[Line],
@@ -1334,7 +1347,7 @@ class PcbPlotParams:
 
 class Setup:
     stackup: Stackup | None
-    pad_to_mask_clearance: int
+    pad_to_mask_clearance: float
     allow_soldermask_bridges_in_footprints: bool
     tenting: list[str]
     pcbplotparams: PcbPlotParams
@@ -1344,7 +1357,7 @@ class Setup:
         self,
         *,
         stackup: Stackup | None,
-        pad_to_mask_clearance: int,
+        pad_to_mask_clearance: float,
         allow_soldermask_bridges_in_footprints: bool,
         tenting: list[str],
         pcbplotparams: PcbPlotParams,

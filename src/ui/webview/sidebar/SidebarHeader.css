@@ -1,0 +1,304 @@
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-shrink: 0;
+  min-width: 0;
+  height: var(--sidebar-section-header-height);
+  min-height: var(--sidebar-section-header-height);
+  padding: 0 var(--spacing-xs);
+  border-bottom: 1px solid var(--accent);
+  background: var(--bg-primary);
+  position: relative;
+  container-type: inline-size;
+}
+
+.sidebar-header::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--accent);
+}
+
+.sidebar-logo {
+  height: 16px;
+  width: auto;
+  max-width: 80px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.sidebar-logo-dark  { display: block; }
+.sidebar-logo-light { display: none; }
+
+body.vscode-light .sidebar-logo-dark,
+body.vscode-high-contrast-light .sidebar-logo-dark { display: none; }
+
+body.vscode-light .sidebar-logo-light,
+body.vscode-high-contrast-light .sidebar-logo-light { display: block; }
+
+.version-badge {
+  margin-left: 0;
+  font-size: var(--font-size-xxs);
+  padding: 1px 5px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  flex-shrink: 1;
+  overflow: hidden;
+}
+
+.sidebar-health {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xxs);
+  font-weight: 600;
+}
+
+.sidebar-header-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.sidebar-header-icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sidebar-header-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.sidebar-signin-btn,
+.sidebar-account-trigger,
+.sidebar-account-menu-item {
+  border: none;
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+
+.sidebar-signin-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: transparent;
+  color: var(--ato-orange);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  transition: opacity var(--transition-fast);
+}
+
+.sidebar-signin-btn:hover {
+  opacity: 0.8;
+}
+
+.sidebar-signin-btn:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.sidebar-signin-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+
+.sidebar-signin-banner-title {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sidebar-signin-banner-hint {
+  font-size: var(--font-size-xxs);
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.sidebar-signin-banner-url {
+  font-size: var(--font-size-xxs);
+  font-family: var(--font-family-mono, monospace);
+  color: var(--text-primary);
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--accent-subtle);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: ltr;
+  user-select: all;
+}
+
+.sidebar-signin-banner-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.sidebar-signin-banner-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 1px solid var(--accent-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: var(--font-size-xxs);
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color var(--transition-fast);
+}
+
+.sidebar-signin-banner-btn:hover {
+  background: var(--bg-hover);
+}
+
+.sidebar-signin-banner-btn-primary {
+  background: var(--ato-orange);
+  color: #fff;
+  border-color: var(--ato-orange);
+}
+
+.sidebar-signin-banner-btn-primary:hover {
+  background: var(--ato-orange);
+  opacity: 0.9;
+}
+
+.sidebar-account {
+  position: relative;
+}
+
+.sidebar-account-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.sidebar-account-trigger:hover {
+  background: var(--bg-hover);
+}
+
+.sidebar-user-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+}
+
+.sidebar-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  object-fit: cover;
+}
+
+.sidebar-avatar-initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font-size: var(--font-size-xxs);
+  font-weight: 700;
+}
+
+.sidebar-account-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
+  padding: 8px;
+  border: 1px solid var(--accent-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+}
+
+.sidebar-account-balance {
+  padding: 4px 8px 8px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--accent-subtle);
+  margin-bottom: 4px;
+}
+
+.sidebar-account-menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.sidebar-account-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+@container (max-width: 260px) {
+  .version-badge {
+    display: none;
+  }
+}
+
+.spin {
+  animation: sidebar-spin 1s linear infinite;
+}
+
+@keyframes sidebar-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}

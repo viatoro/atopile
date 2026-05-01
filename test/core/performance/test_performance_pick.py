@@ -11,8 +11,8 @@ import faebryk.core.faebrykpy as fbrk
 import faebryk.core.graph as graph
 import faebryk.core.node as fabll
 import faebryk.library._F as F
+from faebryk.core.solver import Solver
 from faebryk.core.solver.algorithm import get_algorithms
-from faebryk.core.solver.solver import Solver
 from faebryk.core.solver.utils import LOG_PICK_SOLVE, S_LOG, set_log_level
 from faebryk.libs.picker.picker import (
     NO_PROGRESS_BAR,
@@ -85,9 +85,7 @@ def test_performance_pick_rc_formulas():
     timings.add("construct")
 
     # Create the increase factor literal (dimensionless)
-    dl_unit = (
-        F.Units.Dimensionless.bind_typegraph(tg).create_instance(g=g).is_unit.get()
-    )
+    dl_unit = F.Units.Dimensionless.bind_typegraph(tg).as_type_node().is_unit.get()
     increase_lit = (
         F.Literals.Numbers.bind_typegraph(tg)
         .create_instance(g=g)

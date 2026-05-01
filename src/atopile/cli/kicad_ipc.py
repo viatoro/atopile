@@ -3,6 +3,7 @@
 import logging
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -17,14 +18,16 @@ logger = get_logger(__name__)
 
 def _setup_logger():
     from faebryk.libs.kicad.ipc import running_in_kicad
-    from faebryk.libs.paths import get_log_file
+    from faebryk.libs.paths import get_log_dir
 
     if not running_in_kicad():
         return
     formatter = logging.Formatter(
         "%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
     )
-    file_handler = logging.FileHandler(str(get_log_file("kicad_ipc")), "w", "utf-8")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = get_log_dir() / f"kicad_ipc_{timestamp}.log"
+    file_handler = logging.FileHandler(str(log_path), "w", "utf-8")
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 

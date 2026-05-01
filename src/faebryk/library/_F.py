@@ -31,6 +31,7 @@ from faebryk.library.has_source_chunk import has_source_chunk
 import faebryk.library.Parameters as Parameters
 from faebryk.library.has_name_override import has_name_override
 from faebryk.library.can_bridge_by_name import can_bridge_by_name
+import faebryk.library.DataInterface as DataInterface
 import faebryk.library.Expressions as Expressions
 import faebryk.library.Footprints as Footprints
 import faebryk.library.Pickable as Pickable
@@ -48,7 +49,10 @@ import faebryk.library.KiCadFootprints as KiCadFootprints
 from faebryk.library.implements_design_check import implements_design_check
 from faebryk.library.Electrical import Electrical
 from faebryk.library.has_net_name_suggestion import has_net_name_suggestion
+import faebryk.library.PCBManufacturing as PCBManufacturing
+from faebryk.library.RectangularBoardShape import RectangularBoardShape
 from faebryk.library.has_simple_value_representation import has_simple_value_representation
+from faebryk.library.is_eseries_value import is_eseries_value
 from faebryk.library.is_atomic_part import is_atomic_part
 from faebryk.library.PCB import PCB
 from faebryk.library.has_default_constraint import has_default_constraint
@@ -106,6 +110,7 @@ from faebryk.library.Ethernet import Ethernet
 from faebryk.library.OpAmp import OpAmp
 from faebryk.library.RS485HalfDuplex import RS485HalfDuplex
 from faebryk.library.USB2_0_IF import USB2_0_IF
+from faebryk.library.is_transmission_line import is_transmission_line
 from faebryk.library.SPIFlash import SPIFlash
 from faebryk.library.UART import UART
 from faebryk.library.I2C import I2C
@@ -133,6 +138,7 @@ __all__ = [
     "Parameters",
     "has_name_override",
     "can_bridge_by_name",
+    "DataInterface",
     "Expressions",
     "Footprints",
     "Pickable",
@@ -150,7 +156,10 @@ __all__ = [
     "implements_design_check",
     "Electrical",
     "has_net_name_suggestion",
+    "PCBManufacturing",
+    "RectangularBoardShape",
     "has_simple_value_representation",
+    "is_eseries_value",
     "is_atomic_part",
     "PCB",
     "has_default_constraint",
@@ -208,6 +217,7 @@ __all__ = [
     "OpAmp",
     "RS485HalfDuplex",
     "USB2_0_IF",
+    "is_transmission_line",
     "SPIFlash",
     "UART",
     "I2C",

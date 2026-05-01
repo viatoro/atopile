@@ -136,10 +136,9 @@ X = Range(10*P.W, 20*P.W)
 A = Parameter()
 A.alias_is(X)
 E = A - A
-out, = Solver().simplify(E)
-out[E]
--> Single(0*P.W)
 ```
+
+On the full symbolic solver, `E` collapses to `Single(0*P.W)`. On the default simple path, solving is target-driven instead: solve `A` explicitly with `simplify_for(A.as_operand.get())`, then extract its bound.
 
 This introduces `ParameterOperatables`, specifically `Parameters` (like A in this example) and `Expressions` (like E). Parameters are similar to mathematical variables rather than programming variables. Expressions consist of an operation and a list of operands, where operands can be literals or ParameterOperatables. This allows nested expressions like `Multiply(Add(A, B), C)`.
 
@@ -174,10 +173,9 @@ Is(A, B).assert_()
 A.alias_is(B)
 
 E = A - B
-out, = Solver().simplify(E)
-out[E]
--> Single(0*P.W)
 ```
+
+On the full symbolic solver, that exact aliasing is strong enough to collapse `E` to `Single(0*P.W)`. On the default simple path, solve the parameter targets explicitly with `simplify_for(A.as_operand.get(), B.as_operand.get())`, then extract the bounds you need.
 
 Expression representations can become lengthy and hard to read. For this reason, we provide a more mathematical notation through compact representation:
 
@@ -417,6 +415,15 @@ A, B = Parameter(), Parameter()
 Phases 2/3 iterate through available `algorithms` until no algorithm produces changes in an iteration.
 
 Most symbolic algorithms are in [symbolic/](../../core/solver/symbolic/). The `idempotent_deduplicate` algorithm provides a good starting point for understanding the system.
+
+## Current API Boundary
+
+The preferred solver surface is target-driven:
+
+- Use `Solver().simplify_for(...)` to solve one or more parameter operands.
+- Use `extract_superset(...)` / `try_extract_superset(...)` after `simplify_for(...)` to read solved bounds.
+
+This preference also applies when you import the concrete full symbolic solver directly. `simplify(...)` remains available for compatibility and still appears in some full-solver-only tests, but it is not the preferred entry point for new code.
 
 ## Optimization - WIP
 

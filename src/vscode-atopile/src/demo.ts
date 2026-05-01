@@ -1,232 +1,127 @@
-import * as path from 'path';
-import * as vscode from 'vscode';
-import { traceInfo } from './common/log/logging';
-import { backendServer } from './common/backendServer';
-import { getResourcesPath, loadResource } from './common/resources';
-import { getBuildTarget, getProjectRoot, onProjectRootChanged, onBuildTargetChanged } from './common/target';
-import { Build, getBuilds } from './common/manifest';
-import { isWebIdeUi } from './common/environment';
+import * as path from "path";
+import * as vscode from "vscode";
+import type { CoreClient } from "./coreClient";
+import type { PanelHost } from "./webviewHost";
+import type { ChannelLogger } from "./logger";
+import type { Project } from "../../ui/protocol/generated-types";
+import { isWebIdeUi } from "./utils";
 
-const QUICKSTART_URL = 'https://docs.atopile.io/atopile-0.14.x/quickstart/1-installation';
+async function runDemoMode(
+  client: CoreClient,
+  panelHost: PanelHost,
+  logger: ChannelLogger,
+): Promise<void> {
+  logger.info("[demo] starting");
 
-function openWelcomeTab(): vscode.WebviewPanel {
-    const resourcesUri = vscode.Uri.file(getResourcesPath());
-    const panel = vscode.window.createWebviewPanel(
-        'atopile.welcome',
-        'Welcome to atopile',
-        vscode.ViewColumn.One,
-        { enableScripts: false, retainContextWhenHidden: true, localResourceRoots: [resourcesUri] },
-    );
+  // Focus the atopile sidebar
+  vscode.commands.executeCommand("workbench.view.extension.atopile-sidebar");
 
-    const iconPath = vscode.Uri.file(path.join(getResourcesPath(), 'atopile-icon.svg'));
-    panel.iconPath = { light: iconPath, dark: iconPath };
+  // Close editors (e.g. the "Setup VS Code Web" walkthrough tab)
+  await vscode.commands.executeCommand("workbench.action.closeAllEditors");
 
-    const logoUri = panel.webview.asWebviewUri(
-        vscode.Uri.file(path.join(getResourcesPath(), 'atopile-icon.svg')),
-    );
-    let html = loadResource('welcome.html');
-    html = html.replace(/\{\{logoUri\}\}/g, logoUri.toString());
-    html = html.replace(/\{\{quickstartUrl\}\}/g, QUICKSTART_URL);
-    panel.webview.html = html;
+  // Close chat/auxiliary sidebar if present
+  try {
+    await vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");
+  } catch {
+    // not available in all VS Code flavours
+  }
 
-    return panel;
-}
+  // Show welcome tab immediately
+  panelHost.openPanel("panel-welcome");
+  logger.info("[demo] welcome tab opened");
 
-function entryFileForTarget(target: Build): string {
-    const filePart = target.entry.split(':')[0];
-    return path.join(target.root, filePart);
-}
+  // Wait for the core client to connect
+  const connected = await client.waitForConnected();
+  if (!connected) {
+    logger.info("[demo] timed out waiting for core client connection");
+    return;
+  }
+  logger.info("[demo] core client connected");
 
-/**
- * Resolve the build target for demo mode.
- * Needs getProjectRoot() to be set so we can filter builds.
- */
-function resolveBuildTarget(): Build | undefined {
-    const selected = getBuildTarget();
-    if (selected) {
-        return selected;
-    }
+  // Subscribe to projects so we get notified when discovery finishes
+  client.subscribe(["projects"]);
 
-    const builds = getBuilds();
-    const projectRoot = getProjectRoot();
-    if (projectRoot) {
-        return builds.find(b => b.root === projectRoot);
-    }
+  // Wait for at least one project with targets to be discovered
+  const projects = await client.waitForStoreState<Project[]>(
+    "projects",
+    (ps) => ps.length > 0 && ps.some((p) => p.targets.length > 0),
+    30_000,
+  );
+  if (!projects || projects.length === 0) {
+    logger.info("[demo] timed out waiting for projects");
+    return;
+  }
+  logger.info(`[demo] discovered ${projects.length} project(s)`);
 
-    // Single-project workspace: safe to pick the first
-    const roots = new Set(builds.map(b => b.root));
-    if (roots.size === 1) {
-        return builds[0];
-    }
+  // Auto-select the first project with targets
+  const project = projects.find((p) => p.targets.length > 0);
+  if (!project) {
+    logger.info("[demo] no project with targets found");
+    return;
+  }
+  const target = project.targets[0];
+  logger.info(
+    `[demo] auto-selecting project=${project.root} target=${target.entry}`,
+  );
 
-    return undefined;
-}
+  client.sendAction("selectProject", { projectRoot: project.root });
+  client.sendAction("selectTarget", {
+    target: {
+      name: target.name,
+      entry: target.entry,
+      root: target.root,
+    } as Record<string, unknown>,
+  });
 
-/**
- * Wait for the project root to be set (sidebar sends selectionChanged).
- * Returns immediately if already set.
- */
-function waitForProjectRoot(timeoutMs = 30000): Promise<string | undefined> {
-    const current = getProjectRoot();
-    if (current) {
-        return Promise.resolve(current);
-    }
-    return new Promise<string | undefined>((resolve) => {
-        const timer = setTimeout(() => {
-            d.dispose();
-            traceInfo('[demo] Timed out waiting for project root');
-            resolve(undefined);
-        }, timeoutMs);
-        const d = onProjectRootChanged((root) => {
-            clearTimeout(timer);
-            d.dispose();
-            traceInfo(`[demo] Project root received: ${root}`);
-            resolve(root);
-        });
+  // Wait briefly for selection to propagate through the store
+  await new Promise((r) => setTimeout(r, 500));
+
+  // Open entry .ato file in a vertical split below the welcome tab
+  try {
+    const filePart = target.entry.split(":")[0];
+    const entryPath = path.join(target.root, filePart);
+
+    await vscode.commands.executeCommand("vscode.setEditorLayout", {
+      orientation: 1, // vertical (top/bottom)
+      groups: [{ size: 0.5 }, { size: 0.5 }],
     });
-}
-
-/**
- * Wait for the build target to be set (sidebar sends selectionChanged → setSelectedTargets).
- * Returns immediately if already set.
- */
-function waitForBuildTarget(timeoutMs = 30000): Promise<Build | undefined> {
-    const current = getBuildTarget();
-    if (current) {
-        return Promise.resolve(current);
-    }
-    return new Promise<Build | undefined>((resolve) => {
-        const timer = setTimeout(() => {
-            d.dispose();
-            traceInfo('[demo] Timed out waiting for build target');
-            resolve(undefined);
-        }, timeoutMs);
-        const d = onBuildTargetChanged((target) => {
-            clearTimeout(timer);
-            d.dispose();
-            traceInfo(`[demo] Build target received: ${target?.entry ?? 'undefined'}`);
-            resolve(target);
-        });
+    await vscode.window.showTextDocument(vscode.Uri.file(entryPath), {
+      preview: false,
+      viewColumn: vscode.ViewColumn.Two,
+      preserveFocus: true,
     });
+    logger.info(`[demo] opened entry file: ${entryPath}`);
+  } catch (e) {
+    logger.info(`[demo] failed to open entry file: ${e}`);
+  }
+
+  // Open layout panel
+  try {
+    panelHost.openPanel("panel-layout");
+    logger.info("[demo] layout panel opened");
+  } catch (e) {
+    logger.info(`[demo] failed to open layout panel: ${e}`);
+  }
+
+  // Clean up subscription
+  client.unsubscribe(["projects"]);
+  logger.info("[demo] done");
 }
 
-/**
- * Wait for the backend to be connected. Returns immediately if already connected.
- */
-function waitForBackend(timeoutMs = 30000): Promise<boolean> {
-    if (backendServer.isConnected) {
-        return Promise.resolve(true);
-    }
-    return new Promise<boolean>((resolve) => {
-        const timer = setTimeout(() => {
-            d.dispose();
-            traceInfo('[demo] Timed out waiting for backend connection');
-            resolve(false);
-        }, timeoutMs);
-        const d = backendServer.onStatusChange((connected) => {
-            if (connected) {
-                clearTimeout(timer);
-                d.dispose();
-                resolve(true);
-            }
-        });
-    });
-}
+export function activate(
+  context: vscode.ExtensionContext,
+  client: CoreClient,
+  panelHost: PanelHost,
+  logger: ChannelLogger,
+): void {
+  context.subscriptions.push(
+    vscode.commands.registerCommand("atopile.demo-mode", () =>
+      runDemoMode(client, panelHost, logger),
+    ),
+  );
 
-/**
- * Runs the demo-mode sequence: show welcome page, open the entry .ato file,
- * and open the layout viewer beside the welcome tab.
- */
-async function runDemoMode(): Promise<void> {
-    traceInfo('[demo] runDemoMode starting');
-
-    // Auto-focus the atopile sidebar
-    vscode.commands.executeCommand('workbench.view.extension.atopile-explorer');
-
-    // Close any open editors (e.g. the "Setup VS Code Web" walkthrough tab)
-    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
-
-    // Close chat sidebar — may not exist in all VS Code flavours, so fail silently
-    try {
-        await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
-    } catch {
-        // Not available (e.g. local VS Code without auxiliary bar)
-    }
-
-    // Show welcome tab immediately
-    openWelcomeTab();
-    traceInfo('[demo] Welcome tab opened');
-
-    // Wait for project root and build target (sidebar restores persisted selection asynchronously)
-    traceInfo(`[demo] getProjectRoot(): ${getProjectRoot() ?? 'undefined'}, getBuildTarget(): ${getBuildTarget()?.entry ?? 'undefined'}, getBuilds().length: ${getBuilds().length}`);
-    const projectRoot = await waitForProjectRoot();
-    traceInfo(`[demo] After waitForProjectRoot — getProjectRoot(): ${getProjectRoot() ?? 'undefined'}, getBuildTarget(): ${getBuildTarget()?.entry ?? 'undefined'}`);
-
-    // Wait for build target (setSelectedTargets fires shortly after setProjectRoot in handleSelectionChanged)
-    await waitForBuildTarget();
-    traceInfo(`[demo] After waitForBuildTarget — getBuildTarget(): ${getBuildTarget()?.entry ?? 'undefined'}`);
-
-    // Resolve and open entry file below welcome tab (vertical split)
-    const target = resolveBuildTarget();
-    traceInfo(`[demo] resolveBuildTarget(): ${target ? `${target.entry} (root: ${target.root})` : 'undefined'}`);
-    if (target) {
-        const entryPath = entryFileForTarget(target);
-        traceInfo(`[demo] Opening entry file: ${entryPath}`);
-        try {
-            // Set a two-row layout: welcome on top, entry file on bottom
-            await vscode.commands.executeCommand('vscode.setEditorLayout', {
-                orientation: 1, // vertical (top/bottom)
-                groups: [{ size: 0.5 }, { size: 0.5 }],
-            });
-            await vscode.window.showTextDocument(vscode.Uri.file(entryPath), {
-                preview: false,
-                viewColumn: vscode.ViewColumn.Two,
-                preserveFocus: true,
-            });
-            traceInfo('[demo] Entry file opened');
-        } catch (e) {
-            traceInfo(`[demo] Failed to open entry file: ${e}`);
-        }
-    } else {
-        traceInfo('[demo] No build target resolved, skipping entry file');
-    }
-
-    // Open layout viewer beside
-    traceInfo(`[demo] backendServer.isConnected=${backendServer.isConnected}`);
-    const connected = await waitForBackend();
-    if (!connected) {
-        traceInfo('[demo] Backend not connected, skipping layout');
-        return;
-    }
-
-    const layoutRoot = projectRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    traceInfo(`[demo] openLayout: root=${layoutRoot ?? 'undefined'}`);
-    if (!layoutRoot) {
-        traceInfo('[demo] No root for layout, skipping');
-        return;
-    }
-
-    const layoutTarget = target?.name ?? 'default';
-    traceInfo(`[demo] Calling backendServer.loadLayout with target=${layoutTarget}...`);
-    const ready = await backendServer.loadLayout(layoutRoot, layoutTarget);
-    traceInfo(`[demo] loadLayout returned ${ready}`);
-    if (ready) {
-        traceInfo('[demo] Executing atopile.kicanvas_preview');
-        await vscode.commands.executeCommand('atopile.kicanvas_preview');
-    } else {
-        traceInfo('[demo] Layout model not ready, skipping');
-    }
-
-    traceInfo('[demo] runDemoMode done');
-}
-
-export function activate(context: vscode.ExtensionContext): void {
-    context.subscriptions.push(
-        vscode.commands.registerCommand('atopile.demo-mode', () => runDemoMode()),
-    );
-
-    // Web-ide sessions should always open in demo mode on activation.
-    if (isWebIdeUi()) {
-        vscode.commands.executeCommand('atopile.demo-mode');
-    }
+  // Web-ide sessions auto-trigger demo mode on activation
+  if (isWebIdeUi()) {
+    vscode.commands.executeCommand("atopile.demo-mode");
+  }
 }

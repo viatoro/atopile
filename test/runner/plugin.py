@@ -86,11 +86,11 @@ class HttpClient:
             memory_peak_mb=memory_peak_mb,
         )
 
-        payload = event.model_dump_json()
+        payload = event.model_dump(mode="json")
         backoff = 0.1
         for attempt in range(4):
             try:
-                self.client.post(f"{self.base_url}/event", content=payload)
+                self.client.post(f"{self.base_url}/event", json=payload)
                 return
             except Exception:
                 if attempt < 3:
@@ -117,6 +117,21 @@ def _get_client() -> HttpClient | None:
         if url:
             _client = HttpClient(url)
     return _client
+
+
+def _persist_output_to_test_log(output: dict[str, str]) -> None:
+    sections = (
+        ("stdout", "STDOUT", logging.INFO),
+        ("stderr", "STDERR", logging.WARNING),
+        ("error", "ERROR", logging.ERROR),
+    )
+
+    for key, title, level in sections:
+        content = output.get(key, "").rstrip()
+        if not content:
+            continue
+        logger.log(level, f"====== {title} ======")
+        logger.log(level, content)
 
 
 def pytest_configure(config):
@@ -223,6 +238,11 @@ def pytest_runtest_logreport(report: pytest.TestReport):
             # Extract a concise error message from the full traceback
             # The last non-empty line typically contains the actual error
             error_message = _extract_error_message(report.longreprtext)
+
+        persisted_output = {k: v for k, v in output.items() if k != "log"}
+        if "traceback_structured" in persisted_output:
+            persisted_output.pop("error", None)
+        _persist_output_to_test_log(persisted_output)
 
         # Capture peak memory usage during the test
         try:

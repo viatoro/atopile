@@ -131,7 +131,7 @@ def bind_electricals_to_fbrk_nets(
     # collect buses in a sorted manner
     buses = sorted(
         fabll.is_interface.group_into_buses(electricals_filtered),
-        key=lambda node: node.get_full_name(include_uuid=False),
+        key=lambda node: node.get_full_name(include_root=False),
     )
 
     # find or generate nets

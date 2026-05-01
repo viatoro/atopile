@@ -7,6 +7,7 @@ Handles fetching, caching, and comparing test baselines from:
 """
 
 import json
+import os
 import subprocess
 import tempfile
 import threading
@@ -15,6 +16,14 @@ from datetime import datetime
 from enum import StrEnum, auto
 from pathlib import Path
 from typing import Any, Optional
+
+APP_ROOT = Path(__file__).resolve().parents[2]
+BASELINE_WORKFLOW = os.getenv("FBRK_TEST_BASELINE_WORKFLOW", "pytest.yml")
+
+
+def _run(args: list[str], **kwargs):
+    kwargs.setdefault("cwd", APP_ROOT)
+    return subprocess.run(args, **kwargs)
 
 
 class CompareStatus(StrEnum):
@@ -54,7 +63,7 @@ workflow_runs_lock = threading.Lock()
 def get_current_branch() -> Optional[str]:
     """Get the current git branch name."""
     try:
-        result = subprocess.run(
+        result = _run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True,
             text=True,
@@ -75,7 +84,7 @@ def get_remote_branch_heads() -> list[dict[str, str]]:
     branches = []
     try:
         # Get all remote branches with their commit info
-        result = subprocess.run(
+        result = _run(
             [
                 "git",
                 "for-each-ref",
@@ -124,7 +133,7 @@ def get_branch_base(branch: Optional[str] = None) -> Optional[dict[str, str]]:
     for main_branch in ["main", "master"]:
         try:
             # Check if main branch exists
-            result = subprocess.run(
+            result = _run(
                 ["git", "rev-parse", "--verify", f"origin/{main_branch}"],
                 capture_output=True,
                 timeout=5,
@@ -133,7 +142,7 @@ def get_branch_base(branch: Optional[str] = None) -> Optional[dict[str, str]]:
                 continue
 
             # Get merge-base
-            result = subprocess.run(
+            result = _run(
                 ["git", "merge-base", "HEAD", f"origin/{main_branch}"],
                 capture_output=True,
                 text=True,
@@ -143,7 +152,7 @@ def get_branch_base(branch: Optional[str] = None) -> Optional[dict[str, str]]:
                 merge_base_hash = result.stdout.strip()
 
                 # Get commit info
-                result = subprocess.run(
+                result = _run(
                     [
                         "git",
                         "show",
@@ -175,7 +184,7 @@ def get_branch_base(branch: Optional[str] = None) -> Optional[dict[str, str]]:
 def get_remote_tracking_branch() -> Optional[str]:
     """Get the remote tracking branch (e.g., origin/main)."""
     try:
-        result = subprocess.run(
+        result = _run(
             ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
             capture_output=True,
             text=True,
@@ -191,7 +200,7 @@ def get_remote_tracking_branch() -> Optional[str]:
 def fetch_remote_report(
     commit_hash: Optional[str] = None,
     use_cache: bool = True,
-    remote_baselines_dir: Path = Path("artifacts/baselines/remote"),
+    remote_baselines_dir: Path = APP_ROOT / "artifacts" / "baselines" / "remote",
 ) -> RemoteBaseline:
     """
     Fetch a test report from GitHub Actions.
@@ -213,7 +222,7 @@ def fetch_remote_report(
 
     # Check gh CLI is available and we're in a valid repo
     try:
-        result = subprocess.run(
+        result = _run(
             ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
             capture_output=True,
             text=True,
@@ -236,7 +245,7 @@ def fetch_remote_report(
     if commit_hash:
         # Resolve short hash to full hash using git
         try:
-            result = subprocess.run(
+            result = _run(
                 ["git", "rev-parse", commit_hash],
                 capture_output=True,
                 text=True,
@@ -250,7 +259,7 @@ def fetch_remote_report(
             full_hash = commit_hash
 
         try:
-            result = subprocess.run(
+            result = _run(
                 [
                     "gh",
                     "run",
@@ -258,7 +267,7 @@ def fetch_remote_report(
                     "--commit",
                     full_hash,
                     "--workflow",
-                    "pytest.yml",
+                    BASELINE_WORKFLOW,
                     "--status",
                     "completed",
                     "--limit",
@@ -300,7 +309,7 @@ def fetch_remote_report(
 
         for try_branch in branches_to_try:
             try:
-                result = subprocess.run(
+                result = _run(
                     [
                         "gh",
                         "run",
@@ -308,7 +317,7 @@ def fetch_remote_report(
                         "--branch",
                         try_branch,
                         "--workflow",
-                        "pytest.yml",
+                        BASELINE_WORKFLOW,
                         "--status",
                         "completed",
                         "--limit",
@@ -341,7 +350,7 @@ def fetch_remote_report(
     # Download the test-report.json artifact
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
-            result = subprocess.run(
+            result = _run(
                 [
                     "gh",
                     "run",
@@ -416,7 +425,7 @@ def fetch_remote_report(
 
 
 def list_local_baselines(
-    baselines_index: Path = Path("artifacts/baselines/index.json"),
+    baselines_index: Path = APP_ROOT / "artifacts" / "baselines" / "index.json",
 ) -> list[dict[str, Any]]:
     """List all available local baselines."""
     if not baselines_index.exists():
@@ -429,7 +438,8 @@ def list_local_baselines(
 
 
 def load_local_baseline(
-    name: str, baselines_dir: Path = Path("artifacts/baselines")
+    name: str,
+    baselines_dir: Path = APP_ROOT / "artifacts" / "baselines",
 ) -> RemoteBaseline:
     """
     Load a local baseline by name.
@@ -478,8 +488,8 @@ def load_local_baseline(
 def save_local_baseline(
     report: dict[str, Any],
     name: str,
-    baselines_dir: Path = Path("artifacts/baselines"),
-    baselines_index: Path = Path("artifacts/baselines/index.json"),
+    baselines_dir: Path = APP_ROOT / "artifacts" / "baselines",
+    baselines_index: Path = APP_ROOT / "artifacts" / "baselines" / "index.json",
     platform_name: str = "unknown",
 ) -> Path:
     """
@@ -555,7 +565,7 @@ def fetch_remote_commits(branch: str, limit: int = 20) -> list[dict[str, Any]]:
     try:
         # Try remote branch first, fall back to local branch
         git_ref = f"origin/{branch}"
-        result = subprocess.run(
+        result = _run(
             ["git", "rev-parse", "--verify", git_ref],
             capture_output=True,
             timeout=5,
@@ -564,7 +574,7 @@ def fetch_remote_commits(branch: str, limit: int = 20) -> list[dict[str, Any]]:
             # Remote branch doesn't exist, use local
             git_ref = branch
 
-        result = subprocess.run(
+        result = _run(
             [
                 "git",
                 "log",
@@ -607,19 +617,19 @@ def fetch_remote_commits(branch: str, limit: int = 20) -> list[dict[str, Any]]:
     # Check if gh CLI is available
     gh_available = True
     try:
-        subprocess.run(
+        _run(
             ["gh", "--version"],
             capture_output=True,
             timeout=5,
         )
-    except (FileNotFoundError, Exception):
+    except FileNotFoundError, Exception:
         gh_available = False
 
     # Now fetch workflow runs and match them with git commits
     if gh_available:
         try:
             # Fetch more workflow runs than commits to increase chance of matches
-            result = subprocess.run(
+            result = _run(
                 [
                     "gh",
                     "run",
@@ -627,7 +637,7 @@ def fetch_remote_commits(branch: str, limit: int = 20) -> list[dict[str, Any]]:
                     "--branch",
                     branch,
                     "--workflow",
-                    "pytest.yml",
+                    BASELINE_WORKFLOW,
                     "--limit",
                     str(limit * 3),  # Fetch 3x to cover commits without runs
                     "--json",
@@ -681,23 +691,23 @@ def fetch_all_workflow_runs(limit: int = 200) -> dict[str, dict[str, Any]]:
 
     try:
         # Check if gh CLI is available
-        subprocess.run(
+        _run(
             ["gh", "--version"],
             capture_output=True,
             timeout=5,
         )
-    except (FileNotFoundError, Exception):
+    except FileNotFoundError, Exception:
         return workflow_map
 
     try:
         # Fetch workflow runs WITHOUT branch filter to get all branches
-        result = subprocess.run(
+        result = _run(
             [
                 "gh",
                 "run",
                 "list",
                 "--workflow",
-                "pytest.yml",
+                BASELINE_WORKFLOW,
                 "--limit",
                 str(limit),
                 "--json",

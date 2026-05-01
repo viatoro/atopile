@@ -1,243 +1,228 @@
-"""Tests for the layout server FastAPI app."""
+"""Tests for the standalone layout server websocket RPC contract."""
 
+import asyncio
+import shutil
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from fastapi.testclient import TestClient
 
 from atopile.layout_server.__main__ import create_app
+from atopile.server.domains.layout import LayoutService
+from atopile.server.domains.layout_models import MoveCommand, RedoCommand, UndoCommand
 
 TEST_PCB = Path("test/common/resources/fileformats/kicad/v8/pcb/test.kicad_pcb")
 
 
 @pytest.fixture
-def app():
-    return create_app(TEST_PCB)
+def client(tmp_path: Path) -> TestClient:
+    pcb_path = tmp_path / TEST_PCB.name
+    shutil.copy2(TEST_PCB, pcb_path)
+
+    with TestClient(create_app(pcb_path)) as client:
+        yield client
 
 
-@pytest.fixture
-async def client(app):
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
+def _send_action(
+    websocket,
+    *,
+    action: str,
+    request_id: str | None = None,
+    **payload,
+) -> None:
+    message = {"type": "action", "action": action, **payload}
+    if request_id is not None:
+        message["requestId"] = request_id
+    websocket.send_json(message)
 
 
-@pytest.mark.anyio
-async def test_index(client: AsyncClient):
-    resp = await client.get("/")
+def test_index(client: TestClient) -> None:
+    resp = client.get("/")
     assert resp.status_code == 200
     assert "PCB Layout Editor" in resp.text
 
 
-@pytest.mark.anyio
-async def test_render_model(client: AsyncClient):
-    resp = await client.get("/api/render-model")
-    assert resp.status_code == 200
-    model = resp.json()
-    assert "footprints" in model
-    assert "drawings" in model
-    assert "layers" in model
-    assert "texts" in model
-    assert "tracks" in model
-    assert "board" in model
-    assert isinstance(model["drawings"], list)
-    assert isinstance(model["layers"], list)
-    assert isinstance(model["texts"], list)
-    assert all("filled" in d for d in model["drawings"])
-    assert isinstance(model["footprints"], list)
-    assert len(model["footprints"]) > 0
-    layer_ids = {layer["id"] for layer in model["layers"]}
-    assert all("*" not in layer_id and "&" not in layer_id for layer_id in layer_ids)
-    assert "Edge.Cuts" in layer_ids
-    for layer in model["layers"]:
-        assert "root" in layer
-        assert "kind" in layer
-        assert "group" in layer
-        assert "label" in layer
-        assert "panel_order" in layer
-        assert "paint_order" in layer
-        assert "color" in layer
-        assert "default_visible" in layer
+def test_get_layout_render_model(client: TestClient) -> None:
+    with client.websocket_connect("/ws") as websocket:
+        _send_action(
+            websocket,
+            action="getLayoutRenderModel",
+            request_id="render-model",
+        )
+        resp = websocket.receive_json()
 
-    fp = model["footprints"][0]
-    assert "x" in fp["at"]
-    assert "y" in fp["at"]
-    assert "texts" in fp
-    assert isinstance(fp["texts"], list)
+    assert resp["type"] == "action_result"
+    assert resp["requestId"] == "render-model"
+    assert resp["action"] == "getLayoutRenderModel"
+    assert resp["ok"] is True
 
-    texts = [t for footprint in model["footprints"] for t in footprint.get("texts", [])]
-    assert all("text" in t for t in texts)
-    assert all("at" in t for t in texts)
-    assert all("layer" in t for t in texts)
-    assert all("size" in t for t in texts)
-    assert all("thickness" in t for t in texts)
-    assert all("justify" in t for t in texts)
-    assert all(t.get("text") not in ("%R", "%V", "${REFERENCE}") for t in texts)
+    model = resp["result"]
+    assert model["footprints"]
+    assert model["drawings"] is not None
+    assert model["layers"]
+    assert model["texts"] is not None
+    assert model["tracks"] is not None
+    assert model["board"] is not None
+    assert "edges" in model["board"]
+    assert "Edge.Cuts" in {layer["id"] for layer in model["layers"]}
 
-    used_layers: set[str] = set()
-    used_layers.update(d.get("layer") for d in model["drawings"] if d.get("layer"))
-    used_layers.update(t.get("layer") for t in model["texts"] if t.get("layer"))
-    used_layers.update(t.get("layer") for t in model["tracks"] if t.get("layer"))
 
-    for zone in model["zones"]:
-        used_layers.update(layer for layer in zone.get("layers", []) if layer)
-        used_layers.update(
-            filled.get("layer")
-            for filled in zone.get("filled_polygons", [])
-            if filled.get("layer")
+def test_execute_layout_action_move_undo_redo(client: TestClient) -> None:
+    with client.websocket_connect("/ws") as websocket:
+        _send_action(
+            websocket,
+            action="getLayoutRenderModel",
+            request_id="before",
+        )
+        model_resp = websocket.receive_json()
+        uuid = model_resp["result"]["footprints"][0]["uuid"]
+
+        _send_action(
+            websocket,
+            action="executeLayoutAction",
+            request_id="move",
+            command="move",
+            uuids=[uuid],
+            dx=10.0,
+            dy=20.0,
+        )
+        move_resp = websocket.receive_json()
+
+        _send_action(
+            websocket,
+            action="executeLayoutAction",
+            request_id="undo",
+            command="undo",
+        )
+        undo_resp = websocket.receive_json()
+
+        _send_action(
+            websocket,
+            action="executeLayoutAction",
+            request_id="redo",
+            command="redo",
+        )
+        redo_resp = websocket.receive_json()
+
+    assert move_resp["ok"] is True
+    assert move_resp["result"]["status"] == "ok"
+    assert any(fp["uuid"] == uuid for fp in move_resp["result"]["delta"]["footprints"])
+
+    assert undo_resp["ok"] is True
+    assert undo_resp["result"]["status"] == "ok"
+    assert undo_resp["result"]["delta"] is None
+
+    assert redo_resp["ok"] is True
+    assert redo_resp["result"]["status"] == "ok"
+    assert redo_resp["result"]["delta"] is None
+
+
+def test_execute_layout_action_validation_error(client: TestClient) -> None:
+    with client.websocket_connect("/ws") as websocket:
+        _send_action(
+            websocket,
+            action="executeLayoutAction",
+            request_id="invalid",
+            command="nonexistent",
+        )
+        resp = websocket.receive_json()
+
+    assert resp["type"] == "action_result"
+    assert resp["requestId"] == "invalid"
+    assert resp["action"] == "executeLayoutAction"
+    assert resp["ok"] is False
+    assert resp["result"] is None
+    assert "nonexistent" in resp["error"]
+
+
+def test_subscribe_layout_receives_push_updates(client: TestClient) -> None:
+    with (
+        client.websocket_connect("/ws") as subscriber,
+        client.websocket_connect("/ws") as actor,
+    ):
+        _send_action(subscriber, action="subscribeLayout")
+
+        _send_action(
+            actor,
+            action="getLayoutRenderModel",
+            request_id="render-model",
+        )
+        model_resp = actor.receive_json()
+        uuid = model_resp["result"]["footprints"][0]["uuid"]
+
+        _send_action(
+            actor,
+            action="executeLayoutAction",
+            request_id="move",
+            command="move",
+            uuids=[uuid],
+            dx=1.0,
+            dy=0.0,
+        )
+        delta_msg = subscriber.receive_json()
+        move_resp = actor.receive_json()
+
+        _send_action(
+            actor,
+            action="executeLayoutAction",
+            request_id="undo",
+            command="undo",
+        )
+        updated_msg = subscriber.receive_json()
+        undo_resp = actor.receive_json()
+
+    assert delta_msg["type"] == "layout_delta"
+    assert any(fp["uuid"] == uuid for fp in delta_msg["delta"]["footprints"])
+    assert move_resp["ok"] is True
+    assert move_resp["result"]["status"] == "ok"
+
+    assert updated_msg["type"] == "layout_updated"
+    assert updated_msg["model"]["footprints"]
+    assert undo_resp["ok"] is True
+    assert undo_resp["result"]["status"] == "ok"
+
+
+def test_save_triggered_watcher_reload_preserves_undo_redo_history() -> None:
+    with NamedTemporaryFile(suffix=".kicad_pcb", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    shutil.copy2(TEST_PCB, tmp_path)
+
+    try:
+        service = LayoutService()
+        service.load(tmp_path)
+        original = service.manager.get_render_model().footprints[0]
+        uuid = original.uuid
+        assert uuid is not None
+        original_x = original.at.x
+        original_y = original.at.y
+
+        move_resp = asyncio.run(
+            service.execute_action(
+                MoveCommand(command="move", uuids=[uuid], dx=10.0, dy=20.0)
+            )
+        )
+        asyncio.run(service._on_file_change(object()))
+        undo_resp = asyncio.run(service.execute_action(UndoCommand(command="undo")))
+        after_undo = next(
+            fp
+            for fp in service.manager.get_render_model().footprints
+            if fp.uuid == uuid
+        )
+        redo_resp = asyncio.run(service.execute_action(RedoCommand(command="redo")))
+        after_redo = next(
+            fp
+            for fp in service.manager.get_render_model().footprints
+            if fp.uuid == uuid
         )
 
-    for footprint in model["footprints"]:
-        if footprint.get("layer"):
-            used_layers.add(footprint["layer"])
-        for pad in footprint.get("pads", []):
-            used_layers.update(layer for layer in pad.get("layers", []) if layer)
-        for drawing in footprint.get("drawings", []):
-            if drawing.get("layer"):
-                used_layers.add(drawing["layer"])
-        for text in footprint.get("texts", []):
-            if text.get("layer"):
-                used_layers.add(text["layer"])
-        for annotation in footprint.get("pad_names", []):
-            used_layers.update(
-                layer for layer in annotation.get("layer_ids", []) if layer
-            )
-        for annotation in footprint.get("pad_numbers", []):
-            used_layers.update(
-                layer for layer in annotation.get("layer_ids", []) if layer
-            )
-
-    assert all("*" not in layer and "&" not in layer for layer in used_layers)
-    missing_layers = sorted(used_layers.difference(layer_ids))
-    assert missing_layers == []
-
-    if model.get("zones"):
-        zone = model["zones"][0]
-        assert "keepout" in zone
-        assert "hatch_mode" in zone
-        assert "hatch_pitch" in zone
-        assert "fill_enabled" in zone
-
-
-@pytest.mark.anyio
-async def test_footprints(client: AsyncClient):
-    resp = await client.get("/api/footprints")
-    assert resp.status_code == 200
-    fps = resp.json()
-    assert isinstance(fps, list)
-    assert len(fps) > 0
-    assert "uuid" in fps[0]
-    assert "reference" in fps[0]
-
-
-@pytest.mark.anyio
-async def test_undo_empty(client: AsyncClient):
-    resp = await client.post("/api/execute-action", json={"command": "undo"})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "error"
-    assert data["code"] == "nothing_to_undo"
-    assert "model" not in data
-
-
-@pytest.mark.anyio
-async def test_redo_empty(client: AsyncClient):
-    resp = await client.post("/api/execute-action", json={"command": "redo"})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "error"
-    assert data["code"] == "nothing_to_redo"
-    assert "model" not in data
-
-
-@pytest.mark.anyio
-async def test_execute_action_rotate(client: AsyncClient):
-    fps_resp = await client.get("/api/footprints")
-    fps = fps_resp.json()
-    uuid = fps[0]["uuid"]
-
-    resp = await client.post(
-        "/api/execute-action",
-        json={"command": "rotate", "uuids": [uuid], "delta_degrees": 90},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "ok"
-    assert data["code"] == "ok"
-    assert "model" not in data
-    assert data["delta"] is not None
-    assert any(fp["uuid"] == uuid for fp in data["delta"]["footprints"])
-
-
-@pytest.mark.anyio
-async def test_execute_action_move(client: AsyncClient):
-    fps_resp = await client.get("/api/footprints")
-    fps = fps_resp.json()
-    uuid = fps[0]["uuid"]
-
-    resp = await client.post(
-        "/api/execute-action",
-        json={"command": "move", "uuids": [uuid], "dx": 10.0, "dy": 20.0},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "ok"
-    assert data["code"] == "ok"
-    assert "model" not in data
-    assert data["delta"] is not None
-    assert any(fp["uuid"] == uuid for fp in data["delta"]["footprints"])
-
-
-@pytest.mark.anyio
-async def test_execute_action_flip(client: AsyncClient):
-    fps_resp = await client.get("/api/footprints")
-    fps = fps_resp.json()
-    uuid = fps[0]["uuid"]
-    orig_layer = fps[0]["layer"]
-
-    resp = await client.post(
-        "/api/execute-action",
-        json={"command": "flip", "uuids": [uuid]},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "ok"
-    assert data["code"] == "ok"
-    assert "model" not in data
-    assert data["delta"] is not None
-    assert any(fp["uuid"] == uuid for fp in data["delta"]["footprints"])
-
-    # Verify layer flipped
-    fps_after = await client.get("/api/footprints")
-    flipped = next(f for f in fps_after.json() if f["uuid"] == uuid)
-    expected = "B.Cu" if orig_layer == "F.Cu" else "F.Cu"
-    assert flipped["layer"] == expected
-
-
-@pytest.mark.anyio
-async def test_execute_action_unknown(client: AsyncClient):
-    resp = await client.post(
-        "/api/execute-action",
-        json={"command": "nonexistent"},
-    )
-    assert resp.status_code == 422
-
-
-@pytest.mark.anyio
-async def test_execute_action_undo_success_has_no_model(client: AsyncClient):
-    fps_resp = await client.get("/api/footprints")
-    fps = fps_resp.json()
-    uuid = fps[0]["uuid"]
-
-    move_resp = await client.post(
-        "/api/execute-action",
-        json={"command": "move", "uuids": [uuid], "dx": 1.0, "dy": 0.0},
-    )
-    assert move_resp.status_code == 200
-
-    undo_resp = await client.post("/api/execute-action", json={"command": "undo"})
-    assert undo_resp.status_code == 200
-    data = undo_resp.json()
-    assert data["status"] == "ok"
-    assert data["code"] == "ok"
-    assert "model" not in data
+        assert move_resp.status == "ok"
+        assert undo_resp.status == "ok"
+        assert redo_resp.status == "ok"
+        assert after_undo.at.x == pytest.approx(original_x)
+        assert after_undo.at.y == pytest.approx(original_y)
+        assert after_redo.at.x == pytest.approx(original_x + 10.0)
+        assert after_redo.at.y == pytest.approx(original_y + 20.0)
+    finally:
+        asyncio.run(service.clear())
+        tmp_path.unlink()

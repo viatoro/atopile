@@ -1,6 +1,7 @@
 const graph_mod = @import("graph");
 const std = @import("std");
 const edgebuilder_mod = @import("edgebuilder.zig");
+const cast = @import("cast");
 
 const graph = graph_mod.graph;
 const visitor = graph_mod.visitor;
@@ -78,7 +79,7 @@ pub const EdgeType = struct {
             cb: *const fn (*anyopaque, graph.BoundEdgeReference) visitor.VisitResult(void),
 
             pub fn visit(self_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(void) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
                 const instance = EdgeType.get_instance_node(bound_edge.edge);
                 if (instance) |_| {
                     const instance_result = self.cb(self.cb_ctx, bound_edge);
@@ -103,7 +104,7 @@ test "basic typegraph" {
     // Expects ctx to be a *std.array_list.Managed(graph.BoundEdgeReference)
     const collect = struct {
         pub fn collect_into_list(ctx: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(void) {
-            const list: *std.array_list.Managed(graph.BoundEdgeReference) = @ptrCast(@alignCast(ctx));
+            const list = cast.ctx(std.array_list.Managed(graph.BoundEdgeReference), ctx);
             list.append(bound_edge) catch |e| return visitor.VisitResult(void){ .ERROR = e };
             return visitor.VisitResult(void){ .CONTINUE = {} };
         }

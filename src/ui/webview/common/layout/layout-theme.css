@@ -1,0 +1,12 @@
+:root {
+  --layout-preview-bg: var(--vscode-editor-background, var(--bg-secondary));
+  --layout-preview-loading-bg: var(--vscode-editorWidget-background, rgba(15, 23, 42, 0.88));
+  --layout-preview-border: var(--vscode-panel-border, var(--border-color));
+  --layout-preview-spinner-track: var(--border-subtle);
+  --layout-preview-spinner-accent: var(--vscode-focusBorder, var(--accent));
+}
+
+body.vscode-light,
+body.vscode-high-contrast-light {
+  --layout-preview-loading-bg: var(--vscode-editorWidget-background, rgba(255, 255, 255, 0.92));
+}

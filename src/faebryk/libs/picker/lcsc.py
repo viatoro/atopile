@@ -1,13 +1,17 @@
 # This file is part of the faebryk project
 # SPDX-License-Identifier: MIT
 
+import json
 import logging
 import re
+import time
 import unittest
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import httpx
 import pytest
 from dataclasses_json import (
     CatchAll,
@@ -55,6 +59,23 @@ WORKAROUND_THT_INCH_MM_SWAP_FIX = False
 Some THT models seem to be fixed when assuming their translation is mm instead of inch.
 Does not really make a lot of sense.
 """
+
+
+def _easyeda_api_retry[T](fn: Callable[[], T], retries: int = 3) -> T:
+    """Retry an EasyEDA API call with exponential backoff on JSONDecodeError."""
+    for attempt in range(retries):
+        try:
+            return fn()
+        except json.JSONDecodeError:
+            if attempt == retries - 1:
+                raise
+            delay = 2**attempt
+            logger.warning(
+                f"EasyEDA API returned empty response, "
+                f"retrying in {delay}s (attempt {attempt + 1}/{retries})"
+            )
+            time.sleep(delay)
+    raise AssertionError("unreachable")
 
 
 def _decode_easyeda_date(date: str | int | float) -> datetime:
@@ -343,7 +364,16 @@ class EasyEDAPart:
         assert self._pre_model is not None
         if lifecycle.easyeda2kicad.shall_refresh_model(self):
             logger.debug(f"Downloading model for {self.identifier}")
-            model = EasyedaApi().get_step_3d_model(uuid=self._pre_model.uuid)
+            try:
+                model = EasyedaApi().get_step_3d_model(uuid=self._pre_model.uuid)
+            # HTTPStatusError and other errors are handled internally,
+            # returning None instead
+            except httpx.TransportError as e:
+                raise LCSC_ServiceException(
+                    self.lcsc_id,
+                    f"Failed to fetch 3D model for {self.lcsc_id} from EasyEDA API"
+                    f" (the service may be temporarily unavailable): {e}",
+                ) from e
             # might happen sometimes, that even tho it's in the api, it's not available
             if model is None:
                 self.model = None
@@ -484,6 +514,9 @@ class LCSCException(Exception):
 class LCSC_NoDataException(LCSCException): ...
 
 
+class LCSC_ServiceException(LCSCException): ...
+
+
 class LCSC_PinmapException(LCSCException): ...
 
 
@@ -497,7 +530,26 @@ def get_raw(lcsc_id: str) -> EasyEDAAPIResponse:
 
     logger.debug(f"Downloading API data {lcsc_id}")
     api = EasyedaApi()
-    cad_data = api.get_cad_data_of_component(lcsc_id=lcsc_id)
+    try:
+        cad_data = _easyeda_api_retry(
+            lambda: api.get_cad_data_of_component(lcsc_id=lcsc_id)
+        )
+    except httpx.TransportError as e:
+        raise LCSC_ServiceException(
+            lcsc_id,
+            f"Failed to fetch footprint data for {lcsc_id} from EasyEDA API"
+            f" (the service may be temporarily unavailable): {e}",
+        ) from e
+    except KeyError as e:
+        raise LCSC_ServiceException(
+            lcsc_id,
+            f"Unexpected response format from EasyEDA API for {lcsc_id}: {e}",
+        ) from e
+    except ValueError as e:
+        raise LCSC_ServiceException(
+            lcsc_id,
+            f"Failed to parse response from EasyEDA API for {lcsc_id}: {e}",
+        ) from e
     # API returned no data
     if not cad_data:
         raise LCSC_NoDataException(
@@ -569,6 +621,8 @@ def attach(
     try:
         with timings.measure("download_easyeda"):
             epart = download_easyeda_info(partno, get_model=get_3d_model)
+    except LCSC_ServiceException:
+        raise
     except LCSC_NoDataException:
         if component_with_fp.has_trait(F.Footprints.has_associated_footprint):
             apart = None
@@ -706,6 +760,7 @@ class PickedPartLCSC(PickedPart):
         return self.supplier_partno
 
 
+@pytest.mark.easyeda
 class TestLCSCattach:
     @pytest.mark.usefixtures("setup_project_config")
     def test_attach_resistor(self):
@@ -974,6 +1029,7 @@ This is especially useful while reverse engineering the easyeda translations.
 INTERACTIVE_TESTING = False
 
 
+@pytest.mark.easyeda
 @pytest.mark.usefixtures("setup_project_config")
 class TestLCSC(unittest.TestCase):
     def test_model_translations(self):

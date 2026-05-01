@@ -18,7 +18,8 @@ from typing import (
     overload,
 )
 
-from more_itertools import first, zip_equal
+import pytest
+from more_itertools import first
 from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
@@ -677,7 +678,7 @@ class MutationStage:
                     if not SHOW_SS_IS and expr in created_ops:
                         continue
                     alias_type = "superset" if lits.keys() == {1} else "subset"
-                    value = f"new {alias_type}\n{lit.pretty_str()}"
+                    value = f"new {alias_type}\n{lit.pretty_repr()}"
                     key = expr.compact_repr(no_lit_suffix=True)
                 elif fabll.Traits(op).get_obj_raw().isinstance(F.Expressions.Is):
                     expr = next(
@@ -1050,21 +1051,22 @@ class MutationMap:
 
     @staticmethod
     def _bootstrap_copy(
-        g_in: graph.GraphView, tg_in: fbrk.TypeGraph
+        g_in: graph.GraphView, tg_in: fbrk.TypeGraph, copy_types: bool = True
     ) -> tuple[graph.GraphView, fbrk.TypeGraph]:
         # TODO move somewhere else?
         g_out = graph.GraphView.create()
         tg_out = tg_in.copy_into(target_graph=g_out, minimal=True)
-        for module in (F.Expressions, F.Parameters, F.Literals, F.Units):
-            for _, expr_cls in inspect.getmembers(module):
-                if not isinstance(expr_cls, type):
-                    continue
-                if not issubclass(expr_cls, fabll.Node):
-                    continue
-                fbrk.TypeGraph.copy_node_into(
-                    start_node=expr_cls.bind_typegraph(tg_in).get_or_create_type(),
-                    target_graph=g_out,
-                )
+        if copy_types:
+            for module in (F.Expressions, F.Parameters, F.Literals, F.Units):
+                for _, expr_cls in inspect.getmembers(module):
+                    if not isinstance(expr_cls, type):
+                        continue
+                    if not issubclass(expr_cls, fabll.Node):
+                        continue
+                    fbrk.TypeGraph.copy_node_into(
+                        start_node=expr_cls.bind_typegraph(tg_in).get_or_create_type(),
+                        target_graph=g_out,
+                    )
 
         return g_out, tg_out
 
@@ -1084,6 +1086,7 @@ class MutationMap:
         tg: fbrk.TypeGraph,
         relevant: list[F.Parameters.can_be_operand],
         iteration: int = 0,
+        copy_types: bool = True,
     ) -> "MutationMap":
         relevant_root_predicates = MutatorUtils.get_relevant_predicates(*relevant)
         if S_LOG:
@@ -1100,7 +1103,7 @@ class MutationMap:
                 )
             )
 
-        g_out, tg_out = cls._bootstrap_copy(g, tg)
+        g_out, tg_out = cls._bootstrap_copy(g, tg, copy_types=copy_types)
         logger.info("initial_state is None")
         for pred in relevant_root_predicates:
             pred.copy_into(g_out)
@@ -1121,6 +1124,11 @@ class MutationMap:
         for p_old, p_new in forward_mapping.items():
             if (p_new_p := p_new.as_parameter.try_get()) is not None:
                 p_old_p = p_old.as_parameter.force_get()
+                MutatorUtils.try_copy_trait(
+                    from_op=p_old_p.as_operand.get(),
+                    to_op=p_new_p.as_operand.get(),
+                    trait_t=F.is_eseries_value,
+                )
                 if not MutatorUtils.try_copy_trait(
                     from_op=p_old_p.as_operand.get(),
                     to_op=p_new_p.as_operand.get(),
@@ -1532,7 +1540,7 @@ class ExpressionBuilder[
             # order-sensitive comparison for non-commutative expressions
             all(
                 _operand_matches(x1, x2)
-                for x1, x2 in zip_equal(self.operands, other_ops)
+                for x1, x2 in zip(self.operands, other_ops, strict=True)
             )
             # order-insensitive comparison for commutative expressions
             if other_obj.try_get_trait(F.Expressions.is_commutative) is None
@@ -1677,6 +1685,7 @@ class Mutator:
 
         new_param_p = new_param.as_parameter.force_get()
         new_param_op = new_param_p.as_operand.get()
+        MutatorUtils.try_copy_trait(p_op, new_param_op, F.is_eseries_value)
         if MutatorUtils.try_copy_trait(p_op, new_param_op, F.has_name_override) is None:
             # Preserve the location-based name before it's lost
             new_param_p.set_name(param_obj.get_full_name())
@@ -2621,7 +2630,7 @@ def test_mutator_basic_bootstrap():
             1,
             5,
             unit=F.Units.Dimensionless.bind_typegraph(tg=tg)
-            .create_instance(g=g)
+            .as_type_node()
             .is_unit.get(),
         ),
     )
@@ -2816,6 +2825,7 @@ def test_mutation_map_compressed_with_creations():
             assert orig.maps_to.is_same(comp.maps_to)
 
 
+@pytest.mark.full_solver_only
 def test_mutation_map_compressed_with_mutations():
     """
     Run the solver on a constrained graph and verify that compressed()
@@ -2914,6 +2924,7 @@ def test_mutation_map_compressed_with_removals():
     assert comp_forward.removed
 
 
+@pytest.mark.full_solver_only
 def test_mutation_map_compressed_combined():
     """
     Run the solver on a more complex constrained graph (overlapping constraints,

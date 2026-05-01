@@ -56,7 +56,7 @@ Notes:
 - `ato` is a declarative language for electronics: modules, interfaces, units, tolerances, and assertions
 - The compiler solves constraints, picks parts, runs checks, and updates your KiCad layout
 - The extension adds language services and one‑click controls
-  
+
 Learn more: https://docs.atopile.io/atopile/essentials/1-the-ato-language
 
 ### Where atopile fits in

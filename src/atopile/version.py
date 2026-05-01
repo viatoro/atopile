@@ -35,19 +35,15 @@ def parse(version_str: str) -> Version:
     reconstituting the string
     hatch example: "0.14.0.post1.dev35+g1bd1cf8c4.d20260210230746"
     """
+    from atopile._standalone import pep440_to_semver
+
     if version_str.startswith("v"):
         version_str = version_str[1:]
 
     try:
         version = Version.parse(version_str)
     except ValueError:
-        dot_split = version_str.split(".")
-        if len(dot_split) < 3:
-            dot_split += ["0"] * (3 - len(dot_split))
-        base = ".".join(dot_split[:3])
-        rest = ".".join(dot_split[3:])
-        version_str = f"{base}-{rest}" if rest else base
-        version = Version.parse(version_str)
+        version = Version.parse(pep440_to_semver(version_str))
 
     return version
 
@@ -115,7 +111,7 @@ def get_latest_atopile_version() -> Version | None:
             )
         response.raise_for_status()
         version_str = response.json()["info"]["version"]
-    except (KeyError, HTTPError):
+    except KeyError, HTTPError:
         log.debug("Failed to get latest version")
         return None
 

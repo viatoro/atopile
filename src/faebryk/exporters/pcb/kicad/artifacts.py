@@ -3,7 +3,6 @@
 
 import json
 import logging
-import subprocess
 import subprocess as sp
 import tempfile
 from pathlib import Path
@@ -11,6 +10,8 @@ from typing import Any, Optional
 from zipfile import ZipFile
 
 from kicadcliwrapper.generated.kicad_cli import kicad_cli as k
+
+from faebryk.libs.git import get_short_head_hash
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +27,8 @@ def _export(cmd):
 def githash_layout(layout: Path, out: Path) -> Path:
     # Get current git hash
     try:
-        git_hash = (
-            subprocess.check_output(
-                ["git", "rev-parse", "--short", "HEAD"], cwd=layout.parent
-            )
-            .decode("ascii")
-            .strip()
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
+        git_hash = get_short_head_hash(layout.parent)
+    except Exception:
         logger.warning("Could not get git hash, using 'unknown'")
         git_hash = "unknown"
 

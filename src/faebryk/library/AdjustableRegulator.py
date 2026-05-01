@@ -65,6 +65,9 @@ class AdjustableRegulator(fabll.Node):
         ),
     ]
 
+    # FIXME(simple-solver): this module inherits the symbolic dependency solving of
+    # ResistorVoltageDivider through feedback_divider
+
     # Parameter linkages and constraints
     _constraints = [
         # Link input_voltage/output_voltage to power interface voltages

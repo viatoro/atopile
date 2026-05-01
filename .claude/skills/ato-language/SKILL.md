@@ -46,7 +46,7 @@ ato has exactly three ways to define a new type:
 
 | Keyword     | Semantics                                            | Typical Use                 |
 | ----------- | ---------------------------------------------------- | --------------------------- |
-| `module`    | A design unit that contains children and connections | Circuit blocks, subsystems  |
+| `module`    | A design unit that contains children and connections | Circuit blocks, wrappers    |
 | `interface` | A connectable boundary; can be wired with `~`        | Buses, power rails, signals |
 | `component` | A physical part with footprint/symbol                | Vendor ICs, connectors      |
 

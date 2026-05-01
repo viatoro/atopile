@@ -28,6 +28,7 @@ def test_duplicate_specified_net_names(
     assert "Net name collision" in stdout
 
 
+@pytest.mark.not_in_ci  # requires kicad-cli
 def test_conflicting_net_names(build_app: EXEC_T, save_tmp_path_on_failure: None):
     stdout, _, p = build_app(
         """
@@ -137,7 +138,6 @@ def test_expected_net_name(tmp_path: Path):
     assert not pcb_file.exists()
 
     app = """
-    #pragma experiment("BRIDGE_CONNECT")
     import I2C
     import Resistor
 

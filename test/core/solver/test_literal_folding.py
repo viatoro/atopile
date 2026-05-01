@@ -22,7 +22,7 @@ import faebryk.core.graph as graph
 import faebryk.core.node as fabll
 import faebryk.library._F as F
 from faebryk.core.core import Namespace
-from faebryk.core.solver.solver import Solver
+from faebryk.core.solver import Solver
 from faebryk.core.solver.utils import Contradiction
 from faebryk.libs.test.boundexpressions import BoundExpressions
 from faebryk.libs.test.times import Times
@@ -136,22 +136,14 @@ def eval_pure_literal_expression(
 
 def lit(*values: float) -> F.Parameters.can_be_operand:
     if len(values) == 1:
-        dimless = (
-            F.Units.Dimensionless.bind_typegraph(tg=global_tg)
-            .create_instance(g=global_g)
-            .setup()
-        )
+        dimless = F.Units.Dimensionless.bind_typegraph(tg=global_tg).as_type_node()
         return (
             F.Literals.Numbers.bind_typegraph(tg=global_tg)
             .create_instance(g=global_g)
             .setup_from_singleton(value=values[0], unit=dimless.is_unit.get())
         ).can_be_operand.get()
     elif len(values) == 2:
-        dimless = (
-            F.Units.Dimensionless.bind_typegraph(tg=global_tg)
-            .create_instance(g=global_g)
-            .setup()
-        )
+        dimless = F.Units.Dimensionless.bind_typegraph(tg=global_tg).as_type_node()
         return (
             F.Literals.Numbers.bind_typegraph(tg=global_tg)
             .create_instance(g=global_g)
@@ -164,11 +156,7 @@ def lit(*values: float) -> F.Parameters.can_be_operand:
 
 
 def lit_op_single(val: float) -> F.Parameters.can_be_operand:
-    dimless = (
-        F.Units.Dimensionless.bind_typegraph(tg=global_tg)
-        .create_instance(g=global_g)
-        .setup()
-    )
+    dimless = F.Units.Dimensionless.bind_typegraph(tg=global_tg).as_type_node()
     return (
         F.Literals.Numbers.bind_typegraph(tg=global_tg)
         .create_instance(g=global_g)
@@ -185,11 +173,7 @@ def lit_op_range_op(
 
 def lit_op_range(*values: float) -> F.Parameters.can_be_operand:
     lower, upper = sorted(values)
-    dimless = (
-        F.Units.Dimensionless.bind_typegraph(tg=global_tg)
-        .create_instance(g=global_g)
-        .setup()
-    )
+    dimless = F.Units.Dimensionless.bind_typegraph(tg=global_tg).as_type_node()
     return (
         F.Literals.Numbers.bind_typegraph(tg=global_tg)
         .create_instance(g=global_g)
@@ -648,7 +632,7 @@ def test_can_evaluate_literals_ci():
                 try:
                     result = evaluate_e_p_l(expr)
                     break
-                except (ValueError, NotImplementedError):
+                except ValueError, NotImplementedError:
                     # Skip expressions that can't be evaluated (e.g., negative base to
                     # fractional exponent which would produce complex results)
                     continue
@@ -741,7 +725,7 @@ def test_discover_literal_folding_local(expr: F.Parameters.can_be_operand):
     # Skip expressions that can't be evaluated (e.g., sqrt of negative)
     try:
         evaluated_expr = evaluate_e_p_l(test_expr)
-    except (ValueError, NotImplementedError, OverflowError):
+    except ValueError, NotImplementedError, OverflowError:
         assume(False)
     assert isinstance(evaluated_expr, F.Literals.Numbers)
 
@@ -1007,6 +991,7 @@ regression_examples: list[Callable[[], F.Parameters.can_be_operand]] = [
 
 
 @pytest.mark.parametrize("expr_factory", regression_examples)
+@pytest.mark.full_solver_only
 def test_regression_literal_folding(
     expr_factory: Callable[[], F.Parameters.can_be_operand],
 ):
@@ -1026,7 +1011,7 @@ def test_regression_literal_folding(
     print(f"evaluating {expr.pretty()}")
     try:
         evaluated_expr = evaluate_e_p_l(expr, g=g, tg=tg)
-    except (ValueError, NotImplementedError, OverflowError):
+    except ValueError, NotImplementedError, OverflowError:
         # bad example, skip
         return
     assert isinstance(evaluated_expr, F.Literals.Numbers)
@@ -1132,6 +1117,7 @@ def cleanup_stats():
     Stats.get().finish()
 
 
+@pytest.mark.full_solver_only
 @pytest.mark.slow
 @pytest.mark.usefixtures("cleanup_stats")
 @given(st_exprs.trees)

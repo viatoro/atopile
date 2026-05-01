@@ -167,6 +167,12 @@ def flatten(obj: Iterable, depth=1) -> List:
     return [nested for top in obj for nested in flatten(top, depth=depth - 1)]
 
 
+def prefixes[T](seq: Sequence[T]) -> Iterable[Sequence[T]]:
+    """Yield all non-empty prefixes of a sliceable sequence."""
+    for prefix_len in range(1, len(seq) + 1):
+        yield seq[:prefix_len]
+
+
 def get_key[T, U](haystack: dict[T, U], needle: U) -> T:
     return find(haystack.items(), lambda x: x[1] == needle)[0]
 
@@ -915,7 +921,7 @@ class _ConfigFlagBase[T]:
         else:
             try:
                 res = self._convert(raw_val)
-            except (ValueError, KeyError):
+            except ValueError, KeyError:
                 print(
                     f"Invalid environment variable for "
                     f"{self.name}: {raw_val}. Check your environment variables!"
@@ -1395,7 +1401,7 @@ def in_debug_session() -> bool:
 
         return debugpy.is_client_connected()
 
-    except (ImportError, ModuleNotFoundError):
+    except ImportError, ModuleNotFoundError:
         pass
 
     return False
@@ -2341,36 +2347,20 @@ def try_relative_to(
 
 
 @once
+def app_root() -> Path:
+    return root_by_file("pyproject.toml", Path(__file__).resolve())
+
+
+@once
 def repo_root() -> Path:
     return root_by_file(".git")
-
-
-def in_git_repo(path: Path) -> bool:
-    """Check if a path is in a git repository."""
-    import git
-
-    try:
-        git.Repo(path)
-    except git.InvalidGitRepositoryError:
-        return False
-    return True
-
-
-def test_for_git_executable() -> bool:
-    try:
-        import git  # noqa: F401
-    except ImportError as e:
-        # catch no git executable
-        if "executable" not in e.msg:
-            raise
-        return False
-    return True
 
 
 def root_by_file(pattern: str, start: Path = Path(__file__)) -> Path:
     root = start
     while not (root / pattern).exists():
-        if parent := root.parent:
+        parent = root.parent
+        if parent != root:
             root = parent
         else:
             raise FileNotFoundError("Could not find root")
@@ -2462,55 +2452,6 @@ class SyncedFlag:
 
 def re_in(value: str, patterns: Iterable[str]) -> bool:
     return any(re.match(pattern, value) for pattern in patterns)
-
-
-def clone_repo(
-    repo_url: str,
-    clone_target: Path,
-    depth: int | None = None,
-    ref: str | None = None,
-) -> Path:
-    """Clones a git repository and optionally checks out a specific ref.
-
-    Args:
-        repo_url: The URL of the repository to clone.
-        clone_target: The directory path where the repository should be cloned.
-        depth: If specified, creates a shallow clone with a history truncated
-               to the specified number of commits.
-        ref: The branch, tag, or commit hash to checkout after cloning.
-
-    Returns:
-        The path to the cloned repository (clone_target).
-
-    Raises:
-        git.GitCommandError: If any git command fails.
-    """
-    from git import GitCommandError, Repo
-
-    if depth is not None and ref is not None:
-        # GitPython doesn't automatically handle fetching missing refs on checkout
-        # during shallow clones like the command-line git might with fetch hints.
-        raise NotImplementedError("Cannot specify both depth and ref")
-
-    depth_str = f" with depth {depth or 'full'}" if depth is not None else ""
-    logger.debug(f"Cloning {repo_url} into {clone_target}{depth_str}...")
-    try:
-        repo = Repo.clone_from(repo_url, clone_target, depth=depth)
-        logger.debug(f"Successfully cloned {repo_url}")
-    except GitCommandError as e:
-        logger.error(f"Failed to clone {repo_url}: {e}")
-        raise
-
-    if ref:
-        logger.debug(f"Checking out ref {ref} in {clone_target}...")
-        try:
-            repo.git.checkout(ref)
-            logger.debug(f"Successfully checked out ref {ref}")
-        except GitCommandError as e:
-            logger.error(f"Failed to checkout ref {ref}: {e}")
-            raise
-
-    return clone_target
 
 
 def find_file(base_dir: Path, pattern: str):
@@ -2679,35 +2620,6 @@ def complete_type_string(value: Any) -> str:
         return f"{type(value).__name__}[{', '.join(inner)}]"
     else:
         return type(value).__name__
-
-
-def has_uncommitted_changes(files: Iterable[str | Path]) -> bool | None:
-    """Check if any of the given files have uncommitted changes."""
-    try:
-        from git import Repo
-
-        repo = Repo(search_parent_directories=True)
-        diff_index = repo.index.diff(None)  # Get uncommitted changes
-
-        # Convert all files to Path objects for consistent comparison
-        files = [Path(f).resolve() for f in files]
-        repo_root = Path(repo.working_dir)
-
-        # Check if any of the files have changes
-        for diff in diff_index:
-            touched_file = diff.a_path or diff.b_path
-            # m, c or d
-            assert touched_file is not None
-            touched_path = repo_root / touched_file
-            if touched_path in files:
-                return True
-
-        return False
-    # TODO bad
-    except Exception:
-        # If we can't check git status (not a git repo, etc), assume we don't
-        # have changes
-        return None
 
 
 def least_recently_modified_file(*paths: Path) -> tuple[Path, datetime] | None:
@@ -3110,7 +3022,7 @@ def _run_gdb_linux(test_bin: Path | None) -> None:
                 capture_output=True,
                 check=True,
             )
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except subprocess.CalledProcessError, FileNotFoundError:
             print("coredumpctl not available or no core dump found")
             return
 
@@ -3130,7 +3042,7 @@ def _run_gdb_linux(test_bin: Path | None) -> None:
                 capture_output=True,
                 check=True,
             )
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except subprocess.CalledProcessError, FileNotFoundError:
             print("Failed to dump core file with coredumpctl")
             return
 

@@ -4,6 +4,7 @@ const getset = @import("getset.zig");
 const pyzig = @import("pyzig.zig");
 const util = @import("util.zig");
 const linked_list = @import("linked_list.zig");
+const cast = @import("cast");
 
 fn expectStructWrapper(comptime ChildType: type, value: ?*py.PyObject) ?*pyzig.PyObjectWrapper(ChildType) {
     if (value == null) {
@@ -26,7 +27,7 @@ fn expectStructWrapper(comptime ChildType: type, value: ?*py.PyObject) ?*pyzig.P
         return null;
     }
 
-    return @as(*pyzig.PyObjectWrapper(ChildType), @ptrCast(@alignCast(value.?)));
+    return cast.ctx(pyzig.PyObjectWrapper(ChildType), value.?);
 }
 
 pub fn genStructInit(comptime WrapperType: type, comptime T: type) type {
@@ -45,7 +46,7 @@ pub fn genStructInit(comptime WrapperType: type, comptime T: type) type {
 
         // Generate the __init__ function using a truly generic approach
         pub fn impl(self: ?*py.PyObject, args: ?*py.PyObject, kwargs: ?*py.PyObject) callconv(.c) c_int {
-            const wrapper_obj: *WrapperType = @ptrCast(@alignCast(self));
+            const wrapper_obj = cast.ctx(WrapperType, self);
             wrapper_obj.owned = false;
             wrapper_obj.data = std.heap.c_allocator.create(T) catch return -1;
             wrapper_obj.owned = true;
@@ -599,7 +600,7 @@ pub fn genStructRepr(comptime WrapperType: type, comptime T: type) type {
     return struct {
         // Generate the repr function
         pub fn impl(self: ?*py.PyObject) callconv(.c) ?*py.PyObject {
-            const wrapper_obj: *WrapperType = @ptrCast(@alignCast(self));
+            const wrapper_obj = cast.ctx(WrapperType, self);
             var buf: [65536]u8 = undefined; // 64KB buffer for very large structs
             const out = util.printStruct(wrapper_obj.data.*, &buf) catch |err| {
                 // If even 64KB is not enough, fall back to simple representation

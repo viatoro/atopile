@@ -34,13 +34,6 @@ from faebryk.libs.smd import SMDSize
 logger = get_logger(__name__)
 
 
-def _deprecated_warning(input: str, replacement: str) -> None:
-    with downgrade(DeprecatedException):
-        raise DeprecatedException(
-            f"'{input}' is deprecated. Use '{replacement}' instead."
-        )
-
-
 def _parse_smd_size(value: str) -> SMDSize:
     """
     Parse package string to SMDSize enum.
@@ -100,6 +93,16 @@ def _get_enum_member(enum_type: type[Enum], value: str) -> Enum:
 _ASSIGNMENT_OVERRIDES: dict[str, TraitOverrideSpec] = {
     "required": TraitOverrideSpec(
         trait_class=F.requires_external_usage,
+        expected_type=bool,
+        skip_value=lambda v: not v,
+    ),
+    "is_power_source": TraitOverrideSpec(
+        trait_class=F.is_source,
+        expected_type=bool,
+        skip_value=lambda v: not v,
+    ),
+    "is_power_sink": TraitOverrideSpec(
+        trait_class=F.is_sink,
         expected_type=bool,
         skip_value=lambda v: not v,
     ),
@@ -208,6 +211,12 @@ _ENUM_PARAMETER_OVERRIDES: dict[str, EnumParameterOverrideSpec] = {
     "response_type": EnumParameterOverrideSpec(
         enum_type=F.Fuse.ResponseType,
     ),
+    "layer_type": EnumParameterOverrideSpec(
+        enum_type=F.PCBManufacturing.PCBLayer.LayerType,
+    ),
+    "material": EnumParameterOverrideSpec(
+        enum_type=F.PCBManufacturing.PCBLayer.Material,
+    ),
 }
 
 
@@ -232,9 +241,6 @@ class TraitOverrideRegistry:
         value: Any,
     ) -> list[AddMakeChildAction | AddMakeLinkAction] | NoOpAction:
         """Apply a spec to create trait actions."""
-        if spec.deprecated_hint:
-            _deprecated_warning(name, spec.trait_class.__name__)
-
         if spec.expected_type and not isinstance(value, spec.expected_type):
             raise DslException(
                 f"Invalid value for `{name}`: expected "
@@ -403,6 +409,18 @@ class TraitOverrideRegistry:
     def matches_trait_override(cls, name: str) -> bool:
         return name in _TRAIT_OVERRIDES
 
+    @classmethod
+    def is_deprecated_trait_override(cls, name: str) -> bool:
+        spec = _TRAIT_OVERRIDES.get(name)
+        return spec is not None and spec.deprecated_hint is not None
+
+    @classmethod
+    def get_trait_override_replacement(cls, name: str) -> str | None:
+        spec = _TRAIT_OVERRIDES.get(name)
+        if spec is None or spec.deprecated_hint is None:
+            return None
+        return spec.trait_class.__name__
+
 
 @dataclass
 class ReferenceOverrideSpec:
@@ -514,7 +532,7 @@ class ReferenceOverrideRegistry:
                 suffix = list(path[i + 1 :])
 
                 def _fmt(parts: list[str]) -> str:
-                    return ".".join(parts) if parts else "<self>"
+                    return FieldPath.format_identifiers(parts) if parts else "<self>"
 
                 prefix_str = [p for p in prefix if isinstance(p, str)]
                 suffix_str = [s for s in suffix if isinstance(s, str)]

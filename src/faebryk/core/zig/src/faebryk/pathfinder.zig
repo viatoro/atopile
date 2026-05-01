@@ -5,6 +5,7 @@ const interface_mod = @import("interface.zig");
 const type_mod = @import("node_type.zig");
 const typegraph_mod = @import("typegraph.zig");
 const trait_mod = @import("trait.zig");
+const cast = @import("cast");
 
 const graph = graph_mod.graph;
 const visitor = graph_mod.visitor;
@@ -25,6 +26,8 @@ const TypeNodeAttributes = typegraph_mod.TypeGraph.TypeNodeAttributes;
 const EdgeTrait = trait_mod.EdgeTrait;
 
 const debug_pathfinder = false;
+
+const MonoTimer = @import("compat").MonoTimer;
 
 const BoundNodeRefMap = struct {};
 
@@ -201,7 +204,7 @@ pub const PathFinder = struct {
         self: *Self,
         start_node: BoundNodeReference,
     ) !graph.BFSPaths {
-        var total_timer = try std.time.Timer.start();
+        var total_timer = MonoTimer.start();
         var horizontal_time: u64 = 0;
         var down_time: u64 = 0;
         var up_time: u64 = 0;
@@ -232,7 +235,7 @@ pub const PathFinder = struct {
             while (type_path.instance_paths.elements.pop()) |path_to_bfs| {
                 const node_to_bfs = path_to_bfs.get_last_node();
 
-                var timer = try std.time.Timer.start();
+                var timer = MonoTimer.start();
                 // Horizontal traverse
                 _ = node_to_bfs.g.visit_paths_bfs(
                     node_to_bfs,
@@ -377,7 +380,7 @@ pub const PathFinder = struct {
     }
 
     fn bfs_visit_fn(self_ptr: *anyopaque, path: *graph.BFSPath) graph.BFSVisitResult(void) {
-        const self: *Self = @ptrCast(@alignCast(self_ptr));
+        const self = cast.ctx(Self, self_ptr);
 
         self.visited_path_counter += 1;
 

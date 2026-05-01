@@ -10,10 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Callable, Iterator, cast, override
 
 import caseconverter
-import questionary
 import typer
-from cookiecutter.exceptions import FailedHookException, OutputDirExistsException
-from cookiecutter.main import cookiecutter
 from more_itertools import first
 from rich.table import Table
 
@@ -21,7 +18,8 @@ from atopile import errors, version
 from atopile.address import AddrStr
 from atopile.logging import get_logger
 from atopile.logging_utils import console, rich_print_robust
-from atopile.telemetry import capture
+from atopile.telemetry.telemetry import capture
+from faebryk.libs.git import in_git_repo, test_for_git_executable
 from faebryk.libs.github import (
     GITHUB_USERNAME_REGEX,
     GithubCLI,
@@ -32,8 +30,6 @@ from faebryk.libs.github import (
 )
 from faebryk.libs.util import (
     get_code_bin_of_terminal,
-    in_git_repo,
-    test_for_git_executable,
     try_or,
 )
 
@@ -53,6 +49,8 @@ create_app = typer.Typer(
 
 def _stuck_user_helper() -> Iterator[bool]:
     """Figure out if a user is stuck and help them exit."""
+    import questionary
+
     threshold = 5
     for i in itertools.count():
         if i >= threshold:
@@ -88,6 +86,8 @@ def query_helper[T: str | Path | bool](
     validate_default: bool = True,
 ) -> T:
     """Query a user for input."""
+    import questionary
+
     from atopile.config import config
 
     rich_print_robust(prompt)
@@ -207,6 +207,7 @@ def setup_github(
     repo: "git.Repo",
 ):
     import git
+    import questionary
 
     github_username = gh_cli.get_usernames()
 
@@ -445,6 +446,12 @@ class _Template:
         self.extra_context = extra_context
 
     def run(self, output_dir: Path) -> Path:
+        from cookiecutter.exceptions import (
+            FailedHookException,
+            OutputDirExistsException,
+        )
+        from cookiecutter.main import cookiecutter
+
         from atopile.config import config
 
         try:
@@ -748,6 +755,8 @@ def part(
     project_dir: Annotated[Path | None, typer.Option("--project-dir", "-p")] = None,
 ):
     """Create a new component."""
+    import questionary
+
     from atopile.config import config
     from faebryk.libs.picker.api.api import ApiHTTPError
     from faebryk.libs.picker.api.picker_lib import _extract_numeric_id, client
@@ -882,6 +891,8 @@ def main(ctx: typer.Context):
         return
 
     if not ctx.invoked_subcommand:
+        import questionary
+
         commands = cast(dict, ctx.command.commands)  # type: ignore  # commands is an attribute of the context
         command_name = questionary.select(
             "What would you like to create?",

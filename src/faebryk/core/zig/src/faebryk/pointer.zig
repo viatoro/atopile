@@ -3,6 +3,7 @@ const std = @import("std");
 const composition_mod = @import("composition.zig");
 const edgebuilder_mod = @import("edgebuilder.zig");
 const typegraph_mod = @import("typegraph.zig");
+const cast = @import("cast");
 
 const graph = graph_mod.graph;
 const visitor = graph_mod.visitor;
@@ -86,7 +87,7 @@ pub const EdgePointer = struct {
             cb: *const fn (*anyopaque, BoundEdgeReference) visitor.VisitResult(T),
 
             pub fn visit(self_ptr: *anyopaque, bound_edge: BoundEdgeReference) visitor.VisitResult(T) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
                 return self.cb(self.cb_ctx, bound_edge);
             }
         };
@@ -109,7 +110,7 @@ pub const EdgePointer = struct {
             cb: *const fn (*anyopaque, BoundEdgeReference) visitor.VisitResult(T),
 
             pub fn visit(self_ptr: *anyopaque, bound_edge: BoundEdgeReference) visitor.VisitResult(T) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
                 // Direction filtering is handled by visit_pointed_edges with directed=true
                 if (bound_edge.edge.get_attribute_name()) |name| {
                     if (!std.mem.eql(u8, name, self.identifier)) {
@@ -132,7 +133,7 @@ pub const EdgePointer = struct {
             identifier: str,
 
             pub fn visit(self_ptr: *anyopaque, bound_edge: BoundEdgeReference) visitor.VisitResult(BoundNodeReference) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
                 _ = self;
                 const target = EdgePointer.get_referenced_node(bound_edge.edge);
                 return visitor.VisitResult(BoundNodeReference){ .OK = bound_edge.g.bind(target) };

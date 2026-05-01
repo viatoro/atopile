@@ -18,10 +18,19 @@ class ElectricSignal(fabll.Node):
     line = F.Electrical.MakeChild()
     reference = F.ElectricPower.MakeChild()
 
+    characteristic_impedance = F.Parameters.NumericParameter.MakeChild(unit=F.Units.Ohm)
+
     # ----------------------------------------
     #                 traits
     # ----------------------------------------
     _is_interface = fabll.Traits.MakeEdge(fabll.is_interface.MakeChild())
+
+    bus_parameters = [
+        fabll.Traits.MakeEdge(
+            F.is_alias_bus_parameter.MakeChild(),
+            owner=[characteristic_impedance],
+        ),
+    ]
 
     _can_be_pulled = fabll.Traits.MakeEdge(
         can_be_pulled.can_be_pulled.MakeChild(line, reference)

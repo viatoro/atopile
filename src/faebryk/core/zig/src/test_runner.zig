@@ -11,12 +11,13 @@ pub const std_options: std.Options = .{
 var log_err_count: usize = 0;
 var is_fuzz_test: bool = undefined;
 
-pub fn main() void {
+pub fn main(init: std.process.Init) void {
     @disableInstrumentation();
 
     var filter: ?[]const u8 = null;
 
-    var args = std.process.args();
+    var args = std.process.Args.Iterator.initAllocator(init.minimal.args, init.gpa) catch @panic("args init failed");
+    defer args.deinit();
     _ = args.next(); // skip argv[0]
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--test-filter")) {
@@ -31,11 +32,11 @@ pub fn main() void {
     var fail_count: usize = 0;
     var filtered_count: usize = 0;
 
-    const root_node = if (builtin.fuzz) std.Progress.Node.none else std.Progress.start(.{
+    const root_node = if (builtin.fuzz) std.Progress.Node.none else std.Progress.start(init.io, .{
         .root_name = "Test",
         .estimated_total_items = test_fn_list.len,
     });
-    const have_tty = std.fs.File.stderr().isTty();
+    const have_tty = std.Io.File.stderr().isTty(init.io) catch false;
 
     var leaks: usize = 0;
     for (test_fn_list, 0..) |test_fn, i| {
@@ -83,7 +84,7 @@ pub fn main() void {
                     std.debug.print("FAIL ({s})\n", .{@errorName(err)});
                 }
                 if (@errorReturnTrace()) |trace| {
-                    std.debug.dumpStackTrace(trace.*);
+                    std.debug.dumpErrorReturnTrace(trace);
                 }
                 test_node.end();
             },
@@ -111,7 +112,7 @@ pub fn main() void {
 
 pub fn log(
     comptime message_level: std.log.Level,
-    comptime scope: @Type(.enum_literal),
+    comptime scope: @EnumLiteral(),
     comptime format: []const u8,
     args: anytype,
 ) void {

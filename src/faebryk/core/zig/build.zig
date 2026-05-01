@@ -2,12 +2,13 @@ const std = @import("std");
 
 const py_lib_name = "pyzig";
 
-const ModuleMap = std.StringArrayHashMap(*std.Build.Module);
+const ModuleMap = std.StringArrayHashMapUnmanaged(*std.Build.Module);
 
 fn build_pyi(
     b: *std.Build,
     modules: ModuleMap,
     compat_mod: *std.Build.Module,
+    cast_mod: *std.Build.Module,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) *std.Build.Step {
@@ -25,6 +26,7 @@ fn build_pyi(
         .root_source_file = b.path("src/pyzig/lib.zig"),
         .imports = &.{
             .{ .name = "compat", .module = compat_mod },
+            .{ .name = "cast", .module = cast_mod },
         },
     });
     pyi_exe.root_module.addImport("pyzig", pyzig_mod);
@@ -44,7 +46,7 @@ fn build_pyi(
     const make_dir_step = b.step("make-dir", "Create output directory");
     make_dir_step.makeFn = struct {
         fn make(step: *std.Build.Step, _: std.Build.Step.MakeOptions) !void {
-            std.fs.cwd().makePath(step.owner.getInstallPath(.lib, ".")) catch |err| {
+            std.Io.Dir.cwd().createDirPath(step.owner.graph.io, step.owner.getInstallPath(.lib, ".")) catch |err| {
                 return step.fail("unable to create directory: {}", .{err});
             };
         }
@@ -58,6 +60,7 @@ fn addPythonExtension(
     b: *std.Build,
     modules: ModuleMap,
     compat_mod: *std.Build.Module,
+    cast_mod: *std.Build.Module,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     python_include: []const u8,
@@ -80,6 +83,7 @@ fn addPythonExtension(
         .root_source_file = b.path("src/pyzig/lib.zig"),
         .imports = &.{
             .{ .name = "compat", .module = compat_mod },
+            .{ .name = "cast", .module = cast_mod },
         },
     });
     python_ext.root_module.addImport("pyzig", pyzig_mod);
@@ -89,9 +93,9 @@ fn addPythonExtension(
     }
 
     // Link prebuilt sexp static library so changes in other modules don't force recompiling it.
-    python_ext.linkLibrary(sexp_lib);
+    python_ext.root_module.linkLibrary(sexp_lib);
 
-    python_ext.addIncludePath(.{ .cwd_relative = python_include });
+    python_ext.root_module.addIncludePath(.{ .cwd_relative = python_include });
 
     const builtin = @import("builtin");
     if (builtin.os.tag == .macos) {
@@ -103,15 +107,15 @@ fn addPythonExtension(
         // On Windows, Python extension modules must link against the import library
         if (python_lib_opt) |python_lib| {
             if (python_lib_dir_opt) |lib_dir| {
-                python_ext.addLibraryPath(.{ .cwd_relative = lib_dir });
+                python_ext.root_module.addLibraryPath(.{ .cwd_relative = lib_dir });
             }
-            python_ext.linkSystemLibrary(python_lib);
+            python_ext.root_module.linkSystemLibrary(python_lib, .{});
         } else {
             @panic("python-lib must be provided on Windows builds");
         }
     }
 
-    python_ext.linkLibC();
+    python_ext.root_module.link_libc = true;
 
     // Choose extension filename based on host OS at comptime
     // This value must be comptime-known for dest_sub_path.
@@ -132,6 +136,7 @@ fn addSexpExtension(
     sexp_mod: *std.Build.Module,
     sexp_lib: *std.Build.Step.Compile,
     compat_mod: *std.Build.Module,
+    cast_mod: *std.Build.Module,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     python_lib_opt: ?[]const u8,
@@ -152,12 +157,13 @@ fn addSexpExtension(
         .root_source_file = b.path("src/pyzig/lib.zig"),
         .imports = &.{
             .{ .name = "compat", .module = compat_mod },
+            .{ .name = "cast", .module = cast_mod },
         },
     });
     sexp_ext.root_module.addImport("pyzig", pyzig_mod);
     sexp_ext.root_module.addImport("sexp", sexp_mod);
-    sexp_ext.linkLibrary(sexp_lib);
-    sexp_ext.linkLibC();
+    sexp_ext.root_module.linkLibrary(sexp_lib);
+    sexp_ext.root_module.link_libc = true;
 
     const builtin = @import("builtin");
     if (builtin.os.tag == .macos) {
@@ -168,9 +174,9 @@ fn addSexpExtension(
         // On Windows, Python extension modules must link against the import library
         if (python_lib_opt) |python_lib| {
             if (python_lib_dir_opt) |lib_dir| {
-                sexp_ext.addLibraryPath(.{ .cwd_relative = lib_dir });
+                sexp_ext.root_module.addLibraryPath(.{ .cwd_relative = lib_dir });
             }
-            sexp_ext.linkSystemLibrary(python_lib);
+            sexp_ext.root_module.linkSystemLibrary(python_lib, .{});
         } else {
             @panic("python-lib must be provided on Windows builds");
         }
@@ -190,6 +196,7 @@ fn build_python_module(
     b: *std.Build,
     modules: ModuleMap,
     compat_mod: *std.Build.Module,
+    cast_mod: *std.Build.Module,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     sexp_lib: *std.Build.Step.Compile,
@@ -198,7 +205,7 @@ fn build_python_module(
     python_lib_dir: ?[]const u8,
 ) *std.Build.Step {
     if (python_include_opt) |include_path| {
-        return addPythonExtension(b, modules, compat_mod, target, optimize, include_path, python_lib, python_lib_dir, sexp_lib);
+        return addPythonExtension(b, modules, compat_mod, cast_mod, target, optimize, include_path, python_lib, python_lib_dir, sexp_lib);
     }
     // No-op step to keep a consistent return type.
     return b.step("python-ext-skip", "Skip python extension (no python-include)");
@@ -214,13 +221,21 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/compat/lib.zig"),
     });
 
+    const cast_mod = b.createModule(.{
+        .root_source_file = b.path("src/pyzig/cast.zig"),
+    });
+
     const graph_mod = b.createModule(.{
         .root_source_file = b.path("src/graph/lib.zig"),
     });
+    graph_mod.addImport("cast", cast_mod);
+    graph_mod.addImport("compat", compat_mod);
     const faebryk_mod = b.createModule(.{
         .root_source_file = b.path("src/faebryk/lib.zig"),
     });
     faebryk_mod.addImport("graph", graph_mod);
+    faebryk_mod.addImport("cast", cast_mod);
+    faebryk_mod.addImport("compat", compat_mod);
 
     // Build sexp once as a standalone static library (PIC for shared linking).
     const sexp_lib = b.addLibrary(.{
@@ -242,17 +257,17 @@ pub fn build(b: *std.Build) void {
     sexp_step.dependOn(&install_sexp.step);
 
     // Register modules explicitly so we control which artifacts get reused.
-    var modules_all = ModuleMap.init(b.allocator);
-    defer modules_all.deinit();
-    modules_all.put("graph", graph_mod) catch @panic("OOM registering graph module");
-    modules_all.put("faebryk", faebryk_mod) catch @panic("OOM registering faebryk module");
-    modules_all.put("sexp", sexp_lib.root_module) catch @panic("OOM registering sexp module");
+    var modules_all: ModuleMap = .empty;
+    defer modules_all.deinit(b.allocator);
+    modules_all.put(b.allocator, "graph", graph_mod) catch @panic("OOM registering graph module");
+    modules_all.put(b.allocator, "faebryk", faebryk_mod) catch @panic("OOM registering faebryk module");
+    modules_all.put(b.allocator, "sexp", sexp_lib.root_module) catch @panic("OOM registering sexp module");
 
     // Main python extension excludes sexp so graph-only edits don't rebuild it.
-    var modules_main = ModuleMap.init(b.allocator);
-    defer modules_main.deinit();
-    modules_main.put("graph", graph_mod) catch @panic("OOM registering graph module");
-    modules_main.put("faebryk", faebryk_mod) catch @panic("OOM registering faebryk module");
+    var modules_main: ModuleMap = .empty;
+    defer modules_main.deinit(b.allocator);
+    modules_main.put(b.allocator, "graph", graph_mod) catch @panic("OOM registering graph module");
+    modules_main.put(b.allocator, "faebryk", faebryk_mod) catch @panic("OOM registering faebryk module");
 
     // Get Python options (needed for building extensions)
     const python_include = b.option([]const u8, "python-include", "Python include directory path");
@@ -260,9 +275,9 @@ pub fn build(b: *std.Build) void {
     const python_lib_dir = b.option([]const u8, "python-lib-dir", "Directory containing the Python import library (Windows only)");
 
     // Build standalone sexp extension, main extension, and pyi (all modules).
-    const sexp_ext_step = addSexpExtension(b, sexp_lib.root_module, sexp_lib, compat_mod, target, optimize, python_lib, python_lib_dir);
-    const py_ext_step = build_python_module(b, modules_main, compat_mod, target, optimize, sexp_lib, python_include, python_lib, python_lib_dir);
-    const pyi_step = build_pyi(b, modules_all, compat_mod, target, optimize);
+    const sexp_ext_step = addSexpExtension(b, sexp_lib.root_module, sexp_lib, compat_mod, cast_mod, target, optimize, python_lib, python_lib_dir);
+    const py_ext_step = build_python_module(b, modules_main, compat_mod, cast_mod, target, optimize, sexp_lib, python_include, python_lib, python_lib_dir);
+    const pyi_step = build_pyi(b, modules_all, compat_mod, cast_mod, target, optimize);
 
     // Ensure python-ext depends on sexp ext and pyi generation so one command builds all.
     py_ext_step.dependOn(sexp_ext_step);
@@ -286,12 +301,14 @@ pub fn build(b: *std.Build) void {
         // Add all known modules — zig's lazy compilation skips unused ones
         test_comp.root_module.addImport("graph", graph_mod);
         test_comp.root_module.addImport("faebryk", faebryk_mod);
+        test_comp.root_module.addImport("cast", cast_mod);
+        test_comp.root_module.addImport("compat", compat_mod);
 
         // Match existing compile flags
         test_comp.root_module.sanitize_c = .full;
         test_comp.root_module.omit_frame_pointer = false;
         test_comp.root_module.strip = false;
-        test_comp.linkLibC();
+        test_comp.root_module.link_libc = true;
 
         const install_test = b.addInstallArtifact(test_comp, .{});
         const test_file_step = b.step("test-file", "Build test binary for a zig source file");

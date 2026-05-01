@@ -34,6 +34,11 @@ logger = logging.getLogger(__name__)
 
 # Config -------------------------------------------------------------------------------
 LOG_PICK_SOLVE = ConfigFlag("LOG_PICK_SOLVE", False)
+FULL_SOLVER = ConfigFlag(
+    "FULL_SOLVER",
+    default=False,
+    descr="Use the full symbolic solver instead of the faster simple solver",
+)
 S_LOG = ConfigFlag("SLOG", default=False, descr="Log solver operations")
 VERBOSE_TABLE = ConfigFlag("SVERBOSE_TABLE", default=False, descr="Verbose table")
 SHOW_SS_IS = ConfigFlag(
@@ -145,16 +150,31 @@ class ContradictionByLiteral(Contradiction):
                 return None
             return source_chunk.loc.get().get_full_location()
 
+        def _get_param_name(
+            po: F.Parameters.is_parameter_operatable,
+        ) -> str | None:
+            if p := po.as_parameter.try_get():
+                return p.get_full_name()
+            return None
+
         literals_lines = []
         for lit in self.literals:
             source = _format_source_chunk(fabll.Traits(lit).get_obj_raw())
-            literal_str = lit.pretty_str()
+            literal_str = lit.pretty_repr()
             if source:
                 literals_lines.append(f" - {literal_str} ({source})")
             else:
                 literals_lines.append(f" - {literal_str}")
 
+        # Add parameter name context for involved expressions
+        involved_names = [
+            name for expr in self.involved_exprs if (name := _get_param_name(expr))
+        ]
+
         parts = [super().__str__()]
+
+        if involved_names:
+            parts.append("Parameter: " + ", ".join(f"`{n}`" for n in involved_names))
 
         if self.constraint_sources:
 
@@ -206,6 +226,13 @@ class ContradictionByLiteral(Contradiction):
             parts.append("Constraints:\n" + "\n".join(constraint_lines))
 
         parts.append("Literals:\n" + "\n".join(literals_lines))
+
+        if self.msg == "empty superset":
+            parts.append(
+                "Hint: The constraints on this parameter have no valid"
+                " intersection — check that the ranges overlap"
+            )
+
         return "\n\n".join(parts)
 
     @staticmethod
@@ -579,7 +606,7 @@ class MutatorUtils:
                 .setup(
                     # units removed in canonicalization
                     is_unit=F.Units.Dimensionless.bind_typegraph(self.mutator.tg_out)
-                    .create_instance(self.mutator.G_out)
+                    .as_type_node()
                     .is_unit.get(),
                     domain=F.Parameters.NumericParameter.DOMAIN_SKIP,
                 )
@@ -737,6 +764,14 @@ class MutatorUtils:
         Else would result in owner being copied too.
         """
         if (already := to_op.try_get_sibling_trait(trait_t)) is not None:
+            if (
+                isinstance(already, F.is_eseries_value)
+                and (source_trait := from_op.try_get_sibling_trait(F.is_eseries_value))
+                is not None
+            ):
+                MutatorUtils._populate_is_eseries_value(
+                    dest_trait=already, source_trait=source_trait, g=to_op.g
+                )
             return already
 
         trait = from_op.try_get_sibling_trait(trait_t)
@@ -749,6 +784,28 @@ class MutatorUtils:
 
         fabll.Traits.add_instance_to(fabll.Traits(to_op).get_obj_raw(), copy)
         return copy
+
+    @staticmethod
+    def _populate_is_eseries_value(
+        *,
+        dest_trait: F.is_eseries_value,
+        source_trait: F.is_eseries_value,
+        g: graph.GraphView,
+    ) -> None:
+        dest_trait.series_.get().set_superset(source_trait.series, g=g)
+        dest_trait.tolerance_.get().set_superset(g=g, value=source_trait.tolerance)
+        dest_trait.practical_range_.get().set_superset(
+            g=g,
+            value=(
+                F.Literals.Numbers.bind_typegraph(dest_trait.tg)
+                .create_instance(g=g)
+                .setup_from_min_max(
+                    min=source_trait.practical_min,
+                    max=source_trait.practical_max,
+                    unit=dest_trait.practical_range_.get().try_get_units(),
+                )
+            ),
+        )
 
     @staticmethod
     def get_copy_trait[T: fabll.NodeT](
@@ -770,6 +827,12 @@ class MutatorUtils:
                 trait_instance.setup(
                     name=trait.name.get().get_single(),
                     detail=trait.detail.get().get_single() or None,
+                )
+            case F.is_eseries_value():
+                assert isinstance(trait, F.is_eseries_value)
+                assert isinstance(trait_instance, F.is_eseries_value)
+                MutatorUtils._populate_is_eseries_value(
+                    dest_trait=trait_instance, source_trait=trait, g=g
                 )
             case is_relevant() | is_irrelevant():
                 pass

@@ -17,11 +17,14 @@ class RS485HalfDuplex(fabll.Node):
     baudrate = F.Parameters.NumericParameter.MakeChild(unit=F.Units.BitsPerSecond)
 
     _is_interface = fabll.Traits.MakeEdge(fabll.is_interface.MakeChild())
+    is_data_interface = fabll.Traits.MakeEdge(
+        F.DataInterface.is_data_interface.MakeChild()
+    )
 
     # TIA/EIA-485: characteristic impedance 120 Ohm (100-130 Ohm range)
     _parameter_constraints = [
         F.Literals.Numbers.MakeChild_SetSuperset(
-            [diff_pair, F.DifferentialPair.impedance],
+            [diff_pair, F.DifferentialPair.differential_impedance],
             100.0,
             130.0,
             unit=F.Units.Ohm,

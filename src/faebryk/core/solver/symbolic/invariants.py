@@ -910,7 +910,9 @@ def _fold(
 
     if I_LOG:
         logger.debug(
-            f"Folded `{builder.compact_repr()}` to literal `{lit_fold.pretty_str()}`"
+            "Folded `%s` to literal `%s`",
+            builder.compact_repr(),
+            lit_fold.is_literal.get().pretty_repr(),
         )
     if force_replacable_by_literal or lit_fold.op_setic_is_singleton():
         return lit_fold, True

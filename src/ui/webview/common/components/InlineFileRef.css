@@ -1,0 +1,44 @@
+.inline-file-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-primary);
+  vertical-align: text-bottom;
+  white-space: nowrap;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-decoration: none;
+  max-width: 200px;
+  transition: color var(--transition-fast);
+}
+
+.inline-file-ref:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.inline-file-ref-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.inline-file-ref-line {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.inline-file-ref .file-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.inline-file-ref .file-icon img {
+  display: block;
+  object-fit: contain;
+}

@@ -10,8 +10,8 @@ from atopile.errors import (
     UserFileNotFoundError,
     accumulate,
 )
-from atopile.logging import get_logger
-from atopile.telemetry import capture
+from atopile.logging import get_logger, read_build_logs
+from atopile.telemetry.telemetry import capture
 
 if TYPE_CHECKING:
     from atopile.config import Config
@@ -390,14 +390,13 @@ class _PackageValidators:
 
     @staticmethod
     def verify_no_warnings_or_errors(config: "Config"):
-        from atopile.dataclasses import Build
-        from atopile.model import build_history
-        from atopile.model.sqlite import Logs
+        from atopile.data_models import Build
+        from atopile.model import builds as builds_domain
 
         project_root = str(config.project.paths.root)
 
         # Query recent builds for this project from the database
-        builds = build_history.get_builds_by_project_target(
+        builds = builds_domain.get_builds_by_project(
             project_root=project_root,
             limit=50,  # Get recent builds
         )
@@ -411,7 +410,7 @@ class _PackageValidators:
         # Get the latest build for each target
         latest_by_target: dict[str, Build] = {}
         for build in builds:
-            target = build.target or "default"
+            target = build.name
             if target not in latest_by_target:
                 latest_by_target[target] = build
 
@@ -421,9 +420,9 @@ class _PackageValidators:
         for target, build in latest_by_target.items():
             if not build.build_id:
                 continue
-            log_entries, _ = Logs.fetch_chunk(
-                build.build_id,
-                levels=["WARNING", "ERROR"],
+            log_entries, _ = read_build_logs(
+                build_id=build.build_id,
+                log_levels=["WARNING", "ERROR"],
                 count=5000,
             )
             if not log_entries:

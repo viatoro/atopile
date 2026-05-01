@@ -1,0 +1,28 @@
+{
+  "name": "atopile-webview-ui",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "build": "bun run scripts/build.ts",
+    "watch": "bun run scripts/build.ts --watch"
+  },
+  "dependencies": {
+    "@tanstack/react-table": "^8.21.3",
+    "@xyflow/react": "^12.10.1",
+    "ansi-to-html": "^0.7.2",
+    "earcut": "^3.0.0",
+    "fuse.js": "^7.3.0",
+    "lucide-react": "^0.575.0",
+    "occt-import-js": "^0.0.23",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "three": "^0.181.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.181.0"
+  }
+}

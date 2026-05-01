@@ -243,7 +243,7 @@ class TestJLCBom:
 
     @staticmethod
     def _test_build(app: fabll.Node):
-        from faebryk.core.solver.solver import Solver
+        from faebryk.core.solver import Solver
         from faebryk.libs.app.designators import (
             attach_random_designators,
             load_kicad_pcb_designators,
@@ -255,6 +255,7 @@ class TestJLCBom:
         pick_parts_recursively(app, solver)
         attach_random_designators(app.tg)
 
+    @pytest.mark.easyeda
     @pytest.mark.usefixtures("setup_project_config")
     @staticmethod
     def test_bom_picker_pick():
@@ -268,9 +269,7 @@ class TestJLCBom:
             .setup_from_center_rel(
                 center=10 * 1e3,
                 rel=0.01,
-                unit=F.Units.Ohm.bind_typegraph(tg=tg)
-                .create_instance(g=g)
-                .is_unit.get(),
+                unit=F.Units.Ohm.bind_typegraph(tg=tg).as_type_node().is_unit.get(),
             )
         )
         r.resistance.get().set_superset(g=g, value=r1_value)
@@ -280,17 +279,18 @@ class TestJLCBom:
         bomline = _get_bomline(r.get_trait(F.Pickable.has_part_picked))
         assert bomline is not None
 
+    @pytest.mark.easyeda
     @pytest.mark.usefixtures("setup_project_config")
     @staticmethod
     def test_bom_explicit_pick():
         g = graph.GraphView.create()
         tg = fbrk.TypeGraph.create(g=g)
 
-        # Instantiate units needed for deserializing picked part attributes
+        # Register units needed for deserializing picked part attributes
         # (C25804 is a resistor with resistance, power, and voltage attributes)
-        _ = F.Units.Ohm.bind_typegraph(tg).create_instance(g=g)
-        _ = F.Units.Watt.bind_typegraph(tg).create_instance(g=g)
-        _ = F.Units.Volt.bind_typegraph(tg).create_instance(g=g)
+        F.Units.Ohm.bind_typegraph(tg).as_type_node()
+        F.Units.Watt.bind_typegraph(tg).as_type_node()
+        F.Units.Volt.bind_typegraph(tg).as_type_node()
 
         class _TestComponent(fabll.Node):
             _is_module = fabll.Traits.MakeEdge(fabll.is_module.MakeChild())
@@ -386,5 +386,5 @@ class TestJLCBom:
         assert bomline.Footprint == "UNI_ROYAL_0603WAF4701T5E"
         assert bomline.Manufacturer == "UNI-ROYAL(Uniroyal Elec)"
         assert bomline.Partnumber == "0603WAF4701T5E"
-        assert bomline.Value == "4700±1.0%Ω 0.1W 75V"
+        assert bomline.Value == "4700Ω ±1% 0.1W 75V"
         assert bomline.Designator == "R1"

@@ -146,3 +146,28 @@ def test_iter_leaf_exceptions():
         "test 2.1",
         "test 2.2",
     ]
+
+
+def test_accumulate_does_not_collect_none_for_unmatched_exception_group():
+    with pytest.raises(ExceptionGroup) as excinfo:
+        with accumulate(UserException) as error_collector:
+            with error_collector.collect():
+                raise ExceptionGroup("test", [ValueError("unmatched")])
+
+    assert len(excinfo.value.exceptions) == 1
+    assert isinstance(excinfo.value.exceptions[0], ValueError)
+
+
+def test_accumulate_does_not_mask_unexpected_exception():
+    with pytest.raises(KeyError) as excinfo:
+        with accumulate(UserException) as error_collector:
+            with error_collector.collect():
+                raise UserException("expected user error")
+            with error_collector.collect():
+                raise KeyError("unexpected internal error")
+
+    assert excinfo.value.args == ("unexpected internal error",)
+    assert any(
+        "Additional accumulated errors: expected user error" in note
+        for note in getattr(excinfo.value, "__notes__", [])
+    )

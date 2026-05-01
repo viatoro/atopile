@@ -5,3 +5,4 @@ pub const linked_list = @import("linked_list.zig");
 pub const util = @import("util.zig");
 pub const type_registry = @import("type_registry.zig");
 pub const getset = @import("getset.zig");
+pub const cast = @import("cast");

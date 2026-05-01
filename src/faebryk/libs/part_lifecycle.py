@@ -328,7 +328,7 @@ class PartLifecycle:
 
                 return diff
 
-            if part.path.exists():
+            if part.ato_path.is_file():
                 try:
                     existing = AtoPart.load(part.path)
                 except _FileManuallyModified as ex:
@@ -448,7 +448,7 @@ class PartLifecycle:
             lib_id, _ = identifier.split(":")
             try:
                 lib = _find_footprint([fp_lib_path], lib_id)
-            except* (LibNotInTable, FileNotFoundError):
+            except* LibNotInTable, FileNotFoundError:
                 # For atomic parts, get the source directory from the trait
                 is_atomic_part_ = component.try_get_trait(F.is_atomic_part)
                 if is_atomic_part_ is not None:
@@ -456,7 +456,7 @@ class PartLifecycle:
                     try:
                         source_dir = is_atomic_part_.get_source_dir()
                         self._insert_fp_lib(lib_id, source_dir)
-                    except (FileNotFoundError, ValueError):
+                    except FileNotFoundError, ValueError:
                         raise
 
                     lib = _find_footprint([fp_lib_path], lib_id)
@@ -661,11 +661,11 @@ class PartLifecycle:
 
             if value_t := component.try_get_trait(F.has_simple_value_representation):
                 # Get all specs and create separate properties for each
-                specs = value_t.get_specs()
+                specs = value_t.specs
                 if specs:
                     # First spec goes into the standard "Value" field
                     first_spec = specs[0]
-                    first_value = first_spec.get_value(show_tolerance=False)
+                    first_value = first_spec.get_value()
                     Property.set_property(pcb_fp, _prop_factory("Value", first_value))
 
                     # Additional specs become separate properties
@@ -684,7 +684,7 @@ class PartLifecycle:
             Property.set_property(
                 pcb_fp,
                 _prop_factory(
-                    "atopile_address", component.get_full_name(include_uuid=False)
+                    "atopile_address", component.get_full_name(include_root=False)
                 ),
             )
             if sub_pcb_t := component.try_get_trait(in_sub_pcb):

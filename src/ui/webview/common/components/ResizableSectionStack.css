@@ -1,0 +1,198 @@
+.sidebar-panel-shell {
+  background: transparent;
+}
+
+.sidebar-panel-shell-scroll {
+  padding: 0 12px 12px;
+}
+
+.stacked-layout {
+  margin-inline: 0;
+}
+
+.section-header h3 {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: var(--text-primary);
+}
+
+.section-toggle {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+  min-height: var(--sidebar-section-header-height);
+  padding: 0;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 68%, transparent);
+  border-radius: 0;
+  background: transparent;
+  box-sizing: border-box;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.section-toggle:hover,
+.section-toggle[data-visual-expanded="true"] {
+  background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
+}
+
+.section-toggle[data-visual-expanded="true"] {
+  border-bottom-color: color-mix(in srgb, var(--border-subtle) 100%, transparent);
+}
+
+.section-toggle:hover .section-chevron {
+  color: var(--text-primary);
+}
+
+.section-toggle:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, var(--border-subtle));
+  outline-offset: -1px;
+}
+
+.section-copy {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 100%;
+  padding: 8px 12px;
+}
+
+.section-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  min-height: var(--sidebar-section-header-height);
+  padding: 8px;
+  color: var(--text-primary);
+  transition: color var(--transition-fast), transform var(--transition-fast);
+}
+
+.section-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  justify-self: end;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin-right: 12px;
+  line-height: 0;
+  color: var(--text-muted);
+  transform-origin: center center;
+  transition: transform var(--transition-fast), color var(--transition-fast);
+}
+
+.section-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.section-chevron svg {
+  display: block;
+}
+
+.section-toggle:hover .section-mark {
+  color: var(--accent);
+  transform: translateX(1px);
+}
+
+.resizable-panel-shell {
+  overflow: hidden;
+}
+
+.resizable-section-stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.stacked-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-top: 1px solid color-mix(in srgb, var(--border-subtle) 100%, transparent);
+  margin-top: -1px;
+  flex: none;
+  min-height: 0;
+}
+
+.stacked-section:first-child {
+  border-top: none;
+  margin-top: 0;
+}
+
+.resizable-section-content {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px 0 0;
+  flex: none;
+  box-sizing: border-box;
+}
+
+.resizable-section-content > .sidebar-panel {
+  height: 100%;
+  min-height: 0;
+}
+
+.resizable-section-content > .sidebar-panel > .sidebar-panel-scroll {
+  min-height: 0;
+}
+
+.resizable-section-divider {
+  position: relative;
+  height: 0;
+  flex: none;
+  z-index: 2;
+  overflow: visible;
+}
+
+.resizable-section-resize-handle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -5px;
+  height: 10px;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+  background: transparent;
+}
+
+.resizable-section-resize-handle::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 2px;
+  background: transparent;
+  transition: background var(--transition-fast);
+}
+
+.resizable-section-divider.resizing .resizable-section-resize-handle::after,
+.resizable-section-resize-handle:hover::after {
+  background: color-mix(in srgb, var(--accent) 72%, var(--border-subtle));
+}
+
+.resizable-section-content.compressed {
+  padding: 0;
+}
+
+.resizable-section-content.compressed > .sidebar-panel {
+  display: none;
+}

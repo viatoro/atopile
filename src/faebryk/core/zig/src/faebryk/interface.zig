@@ -9,6 +9,7 @@ const TypeGraph = @import("typegraph.zig").TypeGraph;
 const EdgeType = @import("node_type.zig").EdgeType;
 const Linker = @import("linker.zig").Linker;
 const Trait = @import("trait.zig").Trait;
+const cast = @import("cast");
 
 const Node = graph.Node;
 const NodeReference = graph.NodeReference;
@@ -219,7 +220,7 @@ fn add_is_interface_recursive(tg: *TypeGraph, root: BoundNodeReference) !void {
             g: *GraphView,
 
             pub fn visit_edge(ctx_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(void) {
-                const self: *@This() = @ptrCast(@alignCast(ctx_ptr));
+                const self = cast.ctx(@This(), ctx_ptr);
                 const child = self.g.bind(EdgeComposition.get_child_node(bound_edge.edge));
                 self.stack.append(child) catch @panic("OOM");
                 return visitor.VisitResult(void){ .CONTINUE = {} };
@@ -305,7 +306,7 @@ test "basic" {
         connected_edges: std.array_list.Managed(graph.BoundEdgeReference),
 
         pub fn visit(self_ptr: *anyopaque, connected_edge: graph.BoundEdgeReference) visitor.VisitResult(void) {
-            const self: *@This() = @ptrCast(@alignCast(self_ptr));
+            const self = cast.ctx(@This(), self_ptr);
 
             self.connected_edges.append(connected_edge) catch |err| {
                 return visitor.VisitResult(void){ .ERROR = err };
@@ -876,7 +877,7 @@ test "loooooong_chain" {
     // N0 --> N1 --> ... --> N1000
     // Let's make it hard - create a long chain of nodes
     // Use a more efficient allocator for this stress test instead of testing allocator
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -919,7 +920,7 @@ test "loooooong_chain" {
     std.debug.print("Chain built. Starting pathfinding...\n", .{});
 
     // Start timer
-    var timer = try std.time.Timer.start();
+    var timer = @import("compat").MonoTimer.start();
 
     // Test pathfinding from first to last node
     var path = try EdgeInterfaceConnection.is_connected_to(allocator, nodes.items[0], nodes.items[chain_length - 1]);

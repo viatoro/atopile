@@ -6,8 +6,6 @@ This example shows how to reuse a layout from a sub-module in the top-level modu
 4. Click the atopile pull group button in the top right corner in KiCAD.
 5. Now you should have pre-routed/laid out footprints in the top layout.
 """
-#pragma experiment("FOR_LOOP")
-#pragma experiment("BRIDGE_CONNECT")
 import Resistor
 
 

@@ -359,7 +359,7 @@ def test_addressor_make_child():
 def test_addressor_sets_address_lines(
     address_bits: int, offset: int, expected_bits: list[bool]
 ):
-    from faebryk.core.solver.solver import Solver
+    from faebryk.core.solver import Solver
 
     """Test that address lines are set correctly based on offset bits."""
     g = graph.GraphView.create()
@@ -395,7 +395,7 @@ def test_addressor_sets_address_lines(
 
     # Run solver and attach has_solver trait
     solver = Solver()
-    solver.simplify(g, tg)
+    solver.simplify_for(addressor.offset.get().is_parameter.get())
     fabll.Traits.create_and_add_instance_to(app, F.has_solver).setup(solver)
 
     # Run post-instantiation-setup checks (this triggers address line setting)
@@ -428,7 +428,7 @@ def test_addressor_sets_address_lines(
 @pytest.mark.skip(reason="Currently just a warning")
 def test_addressor_unresolved_offset_raises():
     """Test that an error is raised when offset cannot be determined."""
-    from faebryk.core.solver.solver import Solver
+    from faebryk.core.solver import Solver
 
     g = graph.GraphView.create()
     tg = fbrk.TypeGraph.create(g=g)
@@ -464,7 +464,7 @@ def test_addressor_unresolved_offset_raises():
 
 
 def test_addressor():
-    from faebryk.core.solver.solver import Solver
+    from faebryk.core.solver import Solver
 
     ConfigurableI2CClient = _make_configurable_i2c_client()
 
@@ -485,7 +485,8 @@ def test_addressor():
     )
 
     solver = Solver()
-    solver.simplify(g, tg)
+    addressor = app.addressor.get()
+    solver.simplify_for(addressor.offset.get().is_parameter.get())
 
     # Attach solver and run post-instantiation-setup checks (which sets address lines)
     fabll.Traits.create_and_add_instance_to(app, F.has_solver).setup(solver)
@@ -601,7 +602,7 @@ def _make_i2c_bus_topology():
 
 
 def test_i2c_unique_addresses():
-    from faebryk.core.solver.solver import Solver
+    from faebryk.core.solver import Solver
 
     I2CBusTopology = _make_i2c_bus_topology()
 
@@ -613,7 +614,9 @@ def test_i2c_unique_addresses():
     app.clients[2].get().addressor.get().offset.get().set_superset(g, 3.0)
 
     solver = Solver()
-    solver.simplify(g, tg)
+    solver.simplify_for(
+        *(c.get().addressor.get().offset.get().is_parameter.get() for c in app.clients)
+    )
     fabll.Traits.create_and_add_instance_to(app, F.has_solver).setup(solver)
 
     from faebryk.libs.app import checks as checks_mod
@@ -627,7 +630,7 @@ def test_i2c_unique_addresses():
     reason="I2C.requires_unique_addresses not yet implemented in new core"
 )
 def test_i2c_duplicate_addresses():
-    from faebryk.core.solver.solver import Solver
+    from faebryk.core.solver import Solver
 
     I2CBusTopology = _make_i2c_bus_topology()
 
@@ -639,7 +642,9 @@ def test_i2c_duplicate_addresses():
     app.clients[2].get().addressor.get().offset.get().set_superset(g, 3.0)
 
     solver = Solver()
-    solver.simplify(g, tg)
+    solver.simplify_for(
+        *(c.get().addressor.get().offset.get().is_parameter.get() for c in app.clients)
+    )
     fabll.Traits.create_and_add_instance_to(app, F.has_solver).setup(solver)
 
     # with pytest.raises(F.I2C.requires_unique_addresses.DuplicateAddressException):
@@ -658,7 +663,7 @@ def test_i2c_duplicate_addresses():
     reason="I2C.requires_unique_addresses not yet implemented in new core"
 )
 def test_i2c_duplicate_addresses_isolated():
-    from faebryk.core.solver.solver import Solver
+    from faebryk.core.solver import Solver
 
     I2CBusTopology = _make_i2c_bus_topology()
 
@@ -674,7 +679,9 @@ def test_i2c_duplicate_addresses_isolated():
     app.clients[2].get().addressor.get().offset.get().set_superset(g, 3.0)
 
     solver = Solver()
-    solver.simplify(g, tg)
+    solver.simplify_for(
+        *(c.get().addressor.get().offset.get().is_parameter.get() for c in app.clients)
+    )
     fabll.Traits.create_and_add_instance_to(app, F.has_solver).setup(solver)
 
     # with pytest.raises(F.I2C.requires_unique_addresses.DuplicateAddressException):
@@ -697,7 +704,7 @@ def test_addressor_expression_propagation():
     When: base=24 (0x18), address=25 (0x19)
     Then: offset should be deduced as 1
     """
-    from faebryk.core.solver.solver import Solver
+    from faebryk.core.solver import Solver
 
     g = graph.GraphView.create()
     tg = fbrk.TypeGraph.create(g=g)
@@ -826,7 +833,7 @@ def test_addressor_multi_state_sets_address_lines(
     offset: int, expected_pin_states: list[int]
 ):
     """Test that multi-state address lines connect to correct state_options."""
-    from faebryk.core.solver.solver import Solver
+    from faebryk.core.solver import Solver
 
     g = graph.GraphView.create()
     tg = fbrk.TypeGraph.create(g=g)
@@ -851,7 +858,7 @@ def test_addressor_multi_state_sets_address_lines(
 
     # Run solver
     solver = Solver()
-    solver.simplify(g, tg)
+    solver.simplify_for(addressor.offset.get().is_parameter.get())
     fabll.Traits.create_and_add_instance_to(app, F.has_solver).setup(solver)
 
     # Run design checks

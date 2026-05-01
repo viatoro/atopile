@@ -594,6 +594,7 @@ class BuildTargetConfig(BaseConfigModel, validate_assignment=True):
     keep_net_names: bool | None = Field(default=None)
     frozen: bool = Field(default=False)
     hide_designators: bool | None = Field(default=False)
+    standardize_designators: bool | None = Field(default=None)
     paths: BuildTargetPaths
 
     def __init__(self, **data: Any):
@@ -899,6 +900,7 @@ class ProjectConfig(BaseConfigModel):
         validation_alias=AliasChoices("requires-atopile", "requires_atopile"),
         serialization_alias="requires-atopile",
         default=f"^{clean_version(version.get_installed_atopile_version())}",
+        title="requires-atopile",
     )
     """
     Version required to build this project.
@@ -1190,7 +1192,7 @@ class Config:
         # Check if we're in an interactive terminal session (cross-platform)
         try:
             self.interactive = sys.stdout.isatty() and sys.stdin.isatty()
-        except (AttributeError, ValueError):
+        except AttributeError, ValueError:
             # If we can't determine, default to True for better user experience
             self.interactive = True
 
@@ -1435,7 +1437,7 @@ class Config:
 
         self.project.entry = entry
 
-        logger.info("Using project %s", self.project_dir)
+        logger.debug("Using project %s", self.project_dir)
 
         # if we set an entry-point, we now need to deal with that
         entry_addr_override = self._check_entry_arg_file_path(

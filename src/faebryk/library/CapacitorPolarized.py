@@ -49,7 +49,12 @@ class CapacitorPolarized(fabll.Node):
     S = F.has_simple_value_representation.Spec
     _simple_repr = fabll.Traits.MakeEdge(
         F.has_simple_value_representation.MakeChild(
-            S(capacitance, tolerance=True),
+            S(
+                capacitance,
+                format_mode=(
+                    F.has_simple_value_representation.FormatMode.VALUE_WITH_TOLERANCE
+                ),
+            ),
             S(max_voltage),
         )
     )

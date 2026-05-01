@@ -5,6 +5,7 @@ const trait_mod = @import("trait.zig");
 const edgebuilder_mod = @import("edgebuilder.zig");
 const typegraph_mod = @import("typegraph.zig");
 const linker_mod = @import("linker.zig");
+const cast = @import("cast");
 
 const graph = graph_mod.graph;
 const visitor = graph_mod.visitor;
@@ -98,7 +99,7 @@ pub const EdgeComposition = struct {
             cb: *const fn (*anyopaque, graph.BoundEdgeReference) visitor.VisitResult(T),
 
             pub fn visit(self_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(T) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
                 const child = EdgeComposition.get_child_of(bound_edge.edge, self.target.node);
                 if (child) |_| {
                     const child_result = self.cb(self.cb_ctx, bound_edge);
@@ -145,7 +146,7 @@ pub const EdgeComposition = struct {
             identifier: str,
 
             pub fn visit(self_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(graph.BoundEdgeReference) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
                 if (bound_edge.edge.get_attribute_name()) |name| {
                     if (std.mem.eql(u8, name, self.identifier)) {
                         return visitor.VisitResult(graph.BoundEdgeReference){ .OK = bound_edge };
@@ -180,7 +181,7 @@ pub const EdgeComposition = struct {
             cb: *const fn (*anyopaque, graph.BoundEdgeReference) visitor.VisitResult(T),
 
             pub fn visit(self_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(T) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
                 const child = bound_edge.g.bind(EdgeComposition.get_child_node(bound_edge.edge));
                 if (!EdgeType.is_node_instance_of(child, self.child_type)) {
                     return visitor.VisitResult(T){ .CONTINUE = {} };
@@ -244,7 +245,7 @@ pub const EdgeComposition = struct {
             children: *std.array_list.Managed(ChildEntry),
 
             pub fn visit_edge(self_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(void) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
                 const child = EdgeComposition.get_child_node(bound_edge.edge);
                 const name = bound_edge.edge.get_attribute_name() orelse "";
                 self.children.append(.{ .node = child, .name = name }) catch @panic("OOM");
@@ -323,7 +324,7 @@ test "basic" {
         child_edges: std.array_list.Managed(graph.BoundEdgeReference),
 
         pub fn visit(ctx: *anyopaque, child_edge: graph.BoundEdgeReference) visitor.VisitResult(void) {
-            const self: *@This() = @ptrCast(@alignCast(ctx));
+            const self = cast.ctx(@This(), ctx);
             self.child_edges.append(child_edge) catch |err| {
                 return visitor.VisitResult(void){ .ERROR = err };
             };

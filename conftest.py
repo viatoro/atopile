@@ -4,17 +4,21 @@ import shutil
 from pathlib import Path
 
 import pathvalidate
-import posthog
 import pytest
 
-from atopile import telemetry
 from atopile.logging import AtoLogger
+from atopile.telemetry.config import ENABLE_TELEMETRY
+from faebryk.libs.util import ConfigFlag, robustly_rm_dir
 from faebryk.libs.util import repo_root as _repo_root
-from faebryk.libs.util import robustly_rm_dir
+
+SKIP_EASYEDA = ConfigFlag(
+    "SKIP_EASYEDA",
+    default=False,
+    descr="Skip tests that require the EasyEDA API to be reachable",
+)
 
 # Disable telemetry for testing
-posthog.disabled = True
-telemetry.client.disabled = True
+ENABLE_TELEMETRY.set(False)
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -44,7 +48,14 @@ def pytest_configure(config: pytest.Config) -> None:
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    """Emit @max_parallel lines during --collect-only for the orchestrator."""
+    """Skip easyeda-marked tests when FBRK_SKIP_EASYEDA is set, and emit
+    orchestrator metadata during --collect-only."""
+    if SKIP_EASYEDA:
+        skip_marker = pytest.mark.skip(reason="FBRK_SKIP_EASYEDA is set")
+        for item in items:
+            if item.get_closest_marker("easyeda"):
+                item.add_marker(skip_marker)
+
     if not config.option.collectonly:
         return
     seen: set[str] = set()

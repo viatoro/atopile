@@ -1,14 +1,25 @@
+# ruff: noqa: E402
 import os
 import sys
 import time
+from pathlib import Path
 
 import httpx
 import psutil
 import pytest
 import typer
 
-# Ensure the current directory is in sys.path
-sys.path.insert(0, os.getcwd())
+APP_ROOT = Path(__file__).resolve().parents[2]
+SRC_ROOT = APP_ROOT / "src"
+
+
+def _prepend_import_paths() -> None:
+    for entry in (str(APP_ROOT), str(SRC_ROOT)):
+        if entry not in sys.path:
+            sys.path.insert(0, entry)
+
+
+_prepend_import_paths()
 
 from atopile.logging import AtoLogger
 from test.runner.common import (
@@ -168,7 +179,7 @@ def main():
             try:
                 request = ClaimRequest(pid=pid)
                 resp = client.post(
-                    f"{ORCHESTRATOR_URL}/claim", content=request.model_dump_json()
+                    f"{ORCHESTRATOR_URL}/claim", json=request.model_dump(mode="json")
                 )
                 if resp.status_code != 200:
                     print(
@@ -216,9 +227,9 @@ def main():
         try:
             client.post(
                 f"{ORCHESTRATOR_URL}/event",
-                content=EventRequest(
+                json=EventRequest(
                     type=EventType.EXIT, pid=pid, timestamp=time.time()
-                ).model_dump_json(),
+                ).model_dump(mode="json"),
             )
         except Exception as e:
             print(f"Failed to send exit event: {e}", file=sys.stderr)

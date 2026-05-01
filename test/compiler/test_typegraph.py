@@ -225,7 +225,6 @@ class TestForLoops:
     def test_for_loop_connects_twice(self):
         _, tg, _, result = build_type(
             """
-            #pragma experiment("FOR_LOOP")
             import Resistor
 
             module App:
@@ -248,26 +247,25 @@ class TestForLoops:
             is True
         )
 
-    def test_for_loop_requires_experiment(self):
-        with pytest.raises(DslException, match="(?i)experiment.*enabled"):
-            build_type(
-                """
-                import Resistor
+    def test_for_loop_works_without_pragma(self):
+        """For loops work without pragma."""
+        build_type(
+            """
+            import Resistor
 
-                module App:
-                    left = new Resistor
-                    right = new Resistor
-                    sink = new Resistor
+            module App:
+                left = new Resistor
+                right = new Resistor
+                sink = new Resistor
 
-                    for r in [left, right]:
-                        r ~ sink
-                """
-            )
+                for r in [left, right]:
+                    r ~ sink
+            """
+        )
 
     def test_for_loop_over_sequence(self):
         _, tg, _, result = build_type(
             """
-            #pragma experiment("FOR_LOOP")
             import Resistor
 
             module Inner:
@@ -298,7 +296,6 @@ class TestForLoops:
     def test_for_loop_over_sequence_slice(self):
         _, tg, _, result = build_type(
             """
-            #pragma experiment("FOR_LOOP")
             import Resistor
 
             module Inner:
@@ -328,7 +325,6 @@ class TestForLoops:
         with pytest.raises(DslException, match="Slice step cannot be zero"):
             build_type(
                 """
-                #pragma experiment("FOR_LOOP")
 
                 module Inner:
                     pass
@@ -344,7 +340,6 @@ class TestForLoops:
     def test_for_loop_over_sequence_stride(self):
         _, tg, _, result = build_type(
             """
-            #pragma experiment("FOR_LOOP")
             import Resistor
 
             module Inner:
@@ -378,7 +373,6 @@ class TestForLoops:
         with pytest.raises(DslException, match="Field `r` could not be resolved"):
             build_type(
                 """
-                #pragma experiment("FOR_LOOP")
                 import Resistor
 
                 module App:
@@ -393,7 +387,6 @@ class TestForLoops:
     def test_for_loop_nested_field_paths(self):
         _, tg, _, result = build_type(
             """
-            #pragma experiment("FOR_LOOP")
             import Resistor
 
             module Inner:
@@ -419,7 +412,6 @@ class TestForLoops:
     def test_two_for_loops_same_var_accumulates_links(self):
         _, tg, _, result = build_type(
             """
-            #pragma experiment("FOR_LOOP")
             import Resistor
 
             module App:
@@ -447,7 +439,6 @@ class TestForLoops:
         """Test iterating over a sequence that is a child of a child (nested path)."""
         _, tg, _, result = build_type(
             """
-            #pragma experiment("FOR_LOOP")
             import Resistor
 
             module Inner:
@@ -476,7 +467,6 @@ class TestForLoops:
         """Test slicing a sequence that is a child of a child."""
         _, tg, _, result = build_type(
             """
-            #pragma experiment("FOR_LOOP")
             import Resistor
 
             module Inner:
@@ -512,7 +502,6 @@ class TestForLoops:
         ):
             build_type(
                 """
-                #pragma experiment("FOR_LOOP")
                 import Resistor
 
                 module Resistor2:
@@ -1117,8 +1106,6 @@ class TestCanBridgeByNameShim:
         """Test that can_bridge_by_name creates a can_bridge trait."""
         _, tg, _, result = build_type(
             """
-            #pragma experiment("TRAITS")
-            #pragma experiment("BRIDGE_CONNECT")
 
             import ElectricLogic
             import can_bridge_by_name
@@ -1148,8 +1135,6 @@ class TestCanBridgeByNameShim:
         """Test can_bridge_by_name with default input/output names."""
         _, tg, _, result = build_type(
             """
-            #pragma experiment("TRAITS")
-            #pragma experiment("BRIDGE_CONNECT")
 
             import ElectricLogic
             import can_bridge_by_name
@@ -1176,8 +1161,6 @@ class TestCanBridgeByNameShim:
         """Test that can_bridge_by_name enables ~> syntax for custom modules."""
         _, tg, _, result = build_type(
             """
-            #pragma experiment("TRAITS")
-            #pragma experiment("BRIDGE_CONNECT")
 
             import ElectricPower
             import ElectricLogic
@@ -1226,8 +1209,6 @@ class TestCanBridgeByNameShim:
 
         g, tg, stdlib, result = build_type(
             """
-            #pragma experiment("TRAITS")
-            #pragma experiment("BRIDGE_CONNECT")
 
             import ElectricLogic
             import can_bridge_by_name
@@ -1283,7 +1264,6 @@ class TestHasDatasheetDefinedShim:
         """Test that has_datasheet_defined creates a has_datasheet trait."""
         _, tg, _, result = build_type(
             """
-            #pragma experiment("TRAITS")
 
             import has_datasheet_defined
 
@@ -1314,7 +1294,6 @@ class TestHasDatasheetDefinedShim:
         ):
             build_type(
                 """
-                #pragma experiment("TRAITS")
 
                 import has_datasheet_defined
 
@@ -1337,7 +1316,6 @@ class TestHasSingleElectricReferenceSharedShim:
         """Test that has_single_electric_reference_shared creates the correct trait."""
         _, tg, _, result = build_type(
             """
-            #pragma experiment("TRAITS")
 
             import has_single_electric_reference_shared
 
@@ -1362,7 +1340,6 @@ class TestHasSingleElectricReferenceSharedShim:
         """Test has_single_electric_reference_shared without gnd_only argument."""
         _, tg, _, result = build_type(
             """
-            #pragma experiment("TRAITS")
 
             import has_single_electric_reference_shared
 
@@ -1720,7 +1697,6 @@ class TestSignalsAndPins:
         """Inline signals work in directed connect statements."""
         _, tg, _, result = build_type(
             """
-            #pragma experiment("BRIDGE_CONNECT")
 
             module App:
                 signal a ~> signal b
@@ -1747,7 +1723,6 @@ class TestSignalsAndPins:
         """Inline pins work in directed connect statements."""
         _, tg, _, result = build_type(
             """
-            #pragma experiment("BRIDGE_CONNECT")
 
             component MyComp:
                 pin 1 ~> pin 2
@@ -1778,7 +1753,6 @@ class TestSignalsAndPins:
         """
         _, tg, _, result = build_type(
             """
-            #pragma experiment("BRIDGE_CONNECT")
             import Resistor
 
             module App:
@@ -1884,7 +1858,6 @@ class TestTraitStatements:
         """Trait statement with no target attaches trait to enclosing block."""
         _, tg, _, result = build_type(
             """
-            #pragma experiment("TRAITS")
             import is_pickable
 
             module MyModule:
@@ -1910,7 +1883,6 @@ class TestTraitStatements:
         """Trait statement with target attaches trait to specified child."""
         _, tg, _, result = build_type(
             """
-            #pragma experiment("TRAITS")
             import is_pickable
             import Resistor
 
@@ -1934,24 +1906,22 @@ class TestTraitStatements:
         ]
         assert len(trait_children) == 1
 
-    def test_trait_requires_experiment_flag(self):
-        """Trait statement without experiment pragma raises error."""
-        with pytest.raises(DslException, match="TRAITS.*not enabled"):
-            build_type(
-                """
-                import is_pickable
+    def test_trait_works_without_pragma(self):
+        """Trait statement works without pragma."""
+        build_type(
+            """
+            import is_pickable
 
-                module MyModule:
-                    trait is_pickable
-                """
-            )
+            module MyModule:
+                trait is_pickable
+            """
+        )
 
     def test_trait_requires_import(self):
         """Trait statement without importing the trait raises error."""
         with pytest.raises(DslException, match="must be imported"):
             build_type(
                 """
-                #pragma experiment("TRAITS")
 
                 module MyModule:
                     trait is_pickable
@@ -1966,7 +1936,6 @@ class TestTraitStatements:
         ):
             build_type(
                 """
-                #pragma experiment("TRAITS")
                 import is_pickable
 
                 module MyModule:
@@ -1983,7 +1952,6 @@ class TestTraitStatements:
 
         g, tg, stdlib, result = build_type(
             """
-            #pragma experiment("TRAITS")
             import is_atomic_part
 
             component ConstrainedPart:
@@ -2040,7 +2008,6 @@ class TestTraitStatements:
         # Register the trait and build the ato code
         g, tg, stdlib, result, instance = build_instance(
             """
-            #pragma experiment("TRAITS")
             import has_numeric_param
 
             module MyModule:
@@ -2063,8 +2030,6 @@ class TestTraitStatements:
 
         g, tg, stdlib, result, app_root = build_instance(
             """
-            #pragma experiment("TRAITS")
-            #pragma experiment("INSTANCE_TRAITS")
             import has_net_name_suggestion
             import Electrical
 
@@ -2094,8 +2059,6 @@ class TestTraitStatements:
 
         g, tg, stdlib, result, app_root = build_instance(
             """
-            #pragma experiment("TRAITS")
-            #pragma experiment("INSTANCE_TRAITS")
             import has_net_name_suggestion
             import Resistor
 
@@ -2230,7 +2193,7 @@ class TestAssignments:
             f"Expected 0.003 W, got {base_value} W "
             f"(raw value={value}, multiplier={multiplier})"
         )
-        assert fabll.Traits(r.max_power.get().force_get_units()).get_obj(F.Units.Watt)
+        assert r.max_power.get().force_get_units().serialize() == "W"
 
     def test_assign_bilateral_tolerance(self):
         """Test assigning a bilateral tolerance value to an existing field."""
@@ -2523,23 +2486,21 @@ class TestAssignments:
 class TestModuleTemplating:
     """Test module templating with parameterized modules like Addressor."""
 
-    def test_module_templating_requires_experiment_flag(self):
-        """Module templating without experiment flag should fail."""
-        with pytest.raises(DslException, match="(?i)experiment"):
-            build_type(
-                """
-                import Addressor
+    def test_module_templating_works_without_pragma(self):
+        """Module templating works without pragma."""
+        build_type(
+            """
+            import Addressor
 
-                module App:
-                    addressor = new Addressor<address_bits=2>
-                """
-            )
+            module App:
+                addressor = new Addressor<address_bits=2>
+            """
+        )
 
     def test_module_templating_basic(self):
         """Basic module templating creates the templated child."""
         _, tg, _, result = build_type(
             """
-            #pragma experiment("MODULE_TEMPLATING")
             import Addressor
 
             module App:
@@ -2560,7 +2521,6 @@ class TestModuleTemplating:
         """Module templating works with array instantiation."""
         _, tg, _, result = build_type(
             """
-            #pragma experiment("MODULE_TEMPLATING")
             import Addressor
 
             module App:
@@ -2585,7 +2545,6 @@ class TestModuleTemplating:
         """Multiple templated instances with different parameters."""
         _, tg, _, result = build_type(
             """
-            #pragma experiment("MODULE_TEMPLATING")
             import Addressor
 
             module App:
@@ -3481,6 +3440,89 @@ class TestRetypeOperator:
 
         assert resolved_name == "Capacitor"
 
+    def test_retype_applies_in_source_order(self):
+        """Later retypes overwrite earlier ones on the same field."""
+        g, tg, stdlib, result = build_type(
+            """
+            import Electrical
+
+            module TypeA:
+                a = new Electrical
+
+            module TypeB:
+                b = new Electrical
+
+            module TypeC:
+                c = new Electrical
+
+            module App:
+                part = new TypeA
+                part -> TypeB
+                part -> TypeC
+            """,
+            link=True,
+        )
+
+        app_type = result.state.type_roots["App"]
+        type_ref = tg.get_make_child_type_reference_by_identifier(
+            type_node=app_type, identifier="part"
+        )
+        resolved = fbrk.Linker.get_resolved_type(type_reference=type_ref)
+        resolved_name = fbrk.TypeGraph.get_type_name(type_node=resolved)
+
+        assert "TypeC" in resolved_name
+
+    def test_retype_non_module_source_errors(self):
+        """Retype only allows replacing module-typed fields."""
+        with pytest.raises(
+            DslRichException,
+            match=r"Cannot retype `sig`: type `Electrical` is not a module",
+        ):
+            build_type(
+                """
+                import Electrical
+
+                module App:
+                    sig = new Electrical
+                    sig -> Electrical
+                """,
+                link=True,
+            )
+
+    def test_retype_non_module_target_errors(self):
+        """Retype replacement must also be a module."""
+        match_str = r"Cannot retype `part`: type `Electrical` is not a module"
+        with pytest.raises(DslRichException, match=match_str):
+            build_type(
+                """
+                import Electrical
+                import Resistor
+
+                module App:
+                    part = new Resistor
+                    part -> Electrical
+                """,
+                link=True,
+            )
+
+    def test_retype_nested_non_module_parent_errors(self):
+        """Nested retypes cannot traverse through non-module parents."""
+        with pytest.raises(
+            DslRichException,
+            match=r"Cannot retype `sig.line`: path traverses a non-module type",
+        ):
+            build_type(
+                """
+                import Electrical
+                import ElectricSignal
+
+                module App:
+                    sig = new ElectricSignal
+                    sig.line -> Electrical
+                """,
+                link=True,
+            )
+
     def test_retype_nonexistent_field_errors(self):
         """Retype on a field that doesn't exist raises an error."""
         with pytest.raises(DslException, match="does not exist"):
@@ -3509,6 +3551,32 @@ class TestRetypeOperator:
             )
 
         assert isinstance(e.value.original, DslUndefinedSymbolError)
+
+    def test_retype_error_is_attributed_to_statement(self):
+        """Retype failures should point back to the originating statement."""
+        with pytest.raises(
+            DslRichException,
+            match=r"Cannot retype `inner.missing`: path does not exist",
+        ) as e:
+            build_type(
+                """
+                import Electrical
+
+                module Replacement:
+                    x = new Electrical
+
+                module Inner:
+                    child = new Replacement
+
+                module App:
+                    inner = new Inner
+                    inner.missing -> Replacement
+                """,
+                link=True,
+            )
+
+        assert e.value.source_chunk is not None
+        assert e.value.source_chunk.get_text().strip() == "inner.missing -> Replacement"
 
 
 class TestMakeChildDeduplication:
@@ -3618,10 +3686,8 @@ class TestMakeChildDeduplication:
         assert literal is not None
         assert param.get_values() == [10000.0, 10000.0]
         assert param.force_get_display_units().get_symbols() == ["Ω", "ohm", "ohms"]
-        assert (
-            fabll.Traits(param.force_get_units()).get_obj_raw().get_type_node()
-            == F.Units.Ohm.bind_typegraph(tg=tg).as_type_node().instance
-        )
+        # With type-level singleton units, verify the unit is Ohm via its symbol
+        assert param.force_get_units().serialize() == "Ω"
 
     def test_inherited_explicit_with_implicit_constraint(self):
         """Derived type constrains inherited explicit parameter.
@@ -3788,7 +3854,7 @@ def _build_numeric_param_mutator() -> tuple[
 ]:
     g = graph.GraphView.create()
     tg = fbrk.TypeGraph.create(g=g)
-    unit = F.Units.Dimensionless.bind_typegraph(tg).create_instance(g).is_unit.get()
+    unit = F.Units.Dimensionless.bind_typegraph(tg).as_type_node().is_unit.get()
     param = (
         F.Parameters.NumericParameter.bind_typegraph(tg)
         .create_instance(g)
@@ -3816,7 +3882,7 @@ def test_contradiction_empty_intersection_has_sources():
     msg = str(exc.value)
     assert "Constraints:" in msg
     # Verify that the constraint range appears (shows tracing is working)
-    assert "{0..5}" in msg
+    assert "0-5" in msg
 
 
 def test_contradiction_alias_incompatible_with_subset_has_sources():
@@ -3852,7 +3918,7 @@ def test_contradiction_alias_incompatible_with_subset_has_sources():
         )
     msg = str(exc.value)
     assert "Constraints:" in msg
-    assert "{0..5}" in msg
+    assert "0-5" in msg
 
 
 def test_contradiction_subset_to_different_literal_has_sources():

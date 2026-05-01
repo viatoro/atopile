@@ -1,0 +1,102 @@
+/* ============================================
+   AtoTraceback — structured ato error display
+   ============================================ */
+
+.ato-tb {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-size-sm);
+  border: 1px solid var(--border-subtle);
+  border-left: 2px solid color-mix(in srgb, var(--ato-orange) 60%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-tertiary) 70%, var(--bg-secondary));
+  overflow: hidden;
+  padding: var(--spacing-xs) 0;
+}
+
+/* ---- Frame container ---- */
+.ato-tb-frame {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+/* ---- Frame header ---- */
+.ato-tb-frame-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  width: 100%;
+  padding: 2px var(--spacing-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  text-align: left;
+}
+
+.ato-tb-frame-header:hover {
+  background: var(--bg-hover);
+}
+
+.ato-tb-chevron {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+  transform: rotate(-90deg);
+}
+
+.ato-tb-chevron.open {
+  transform: rotate(0deg);
+}
+
+/* ---- Code block ---- */
+.ato-tb-code {
+  overflow-x: auto;
+  padding: var(--spacing-xs) var(--spacing-sm) var(--spacing-xs)
+    calc(var(--spacing-sm) + 12px + var(--spacing-xs));
+}
+
+.ato-tb-line {
+  display: flex;
+  align-items: flex-start;
+  line-height: 1.5;
+  padding: 0 var(--spacing-sm) 0 0;
+}
+
+.ato-tb-line.highlighted .ato-tb-lineno {
+  color: var(--ato-orange);
+  opacity: 1;
+}
+
+.ato-tb-lineno {
+  width: 24px;
+  flex-shrink: 0;
+  text-align: right;
+  padding-right: var(--spacing-sm);
+  color: var(--text-muted);
+  opacity: 0.4;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.ato-tb-line.highlighted .ato-tb-lineno {
+  color: var(--ato-orange);
+  opacity: 0.7;
+}
+
+.ato-tb-line-code {
+  flex: 1;
+  white-space: pre;
+  min-width: 0;
+}
+
+/* ---- Syntax highlighting (shared ato-* classes from codeHighlight) ---- */
+.ato-code .ato-kw { color: var(--ctp-mauve); font-weight: 600; }
+.ato-code .ato-type { color: var(--ctp-yellow); }
+.ato-code .ato-ident { color: var(--text-primary); }
+.ato-code .ato-str { color: var(--ctp-green); }
+.ato-code .ato-num { color: var(--ctp-peach); }
+.ato-code .ato-conn { color: var(--ctp-teal); font-weight: 700; }
+.ato-code .ato-comment { color: var(--text-muted); font-style: italic; }

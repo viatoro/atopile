@@ -1,0 +1,42 @@
+/* ============================================
+   Overflow Bar — shared overflow-into-dropdown
+   ============================================ */
+
+.overflow-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  width: 100%;
+}
+
+/* Overflow dropdown trigger */
+.overflow-bar-menu {
+  flex: 0 0 auto;
+}
+
+.overflow-bar-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: unset;
+  padding: 0 8px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.overflow-bar-trigger:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.overflow-bar-content {
+  left: auto;
+  right: 0;
+  min-width: 160px;
+}

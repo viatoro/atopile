@@ -10,15 +10,15 @@ builds:
     hide_designators: true
 
 dependencies:
-- type: registry
-  identifier: atopile/buttons
-  release: 0.4.0
-- type: registry
-  identifier: atopile/ti-tlv75901
-  release: 0.4.0
-- type: registry
-  identifier: atopile/usb-connectors
-  release: 0.4.1
-- type: registry
-  identifier: atopile/espressif-esp32-c3
-  release: 0.3.0
+  - type: registry
+    identifier: atopile/buttons
+    release: 0.4.0
+  - type: registry
+    identifier: atopile/ti-tlv75901
+    release: 0.5.0
+  - type: registry
+    identifier: atopile/usb-connectors
+    release: 0.4.1
+  - type: registry
+    identifier: atopile/espressif-esp32-c3
+    release: 0.4.0

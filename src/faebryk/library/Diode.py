@@ -48,7 +48,13 @@ class Diode(fabll.Node):
     S = F.has_simple_value_representation.Spec
     _simple_repr = fabll.Traits.MakeEdge(
         F.has_simple_value_representation.MakeChild(
-            S(forward_voltage, tolerance=True, prefix="Vf"),
+            S(
+                forward_voltage,
+                format_mode=(
+                    F.has_simple_value_representation.FormatMode.VALUE_WITH_TOLERANCE
+                ),
+                prefix="Vf",
+            ),
             S(current, prefix="If"),
         )
     )

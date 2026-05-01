@@ -10,7 +10,7 @@ import faebryk.core.faebrykpy as fbrk
 import faebryk.core.node as fabll
 
 if TYPE_CHECKING:
-    from faebryk.core.solver.solver import Solver
+    from faebryk.core.solver import Solver
 
 logger = logging.getLogger(__name__)
 

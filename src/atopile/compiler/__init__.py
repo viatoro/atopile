@@ -10,6 +10,7 @@ from rich.text import Text
 import atopile.compiler.ast_types as AST
 import faebryk.core.faebrykpy as fbrk
 import faebryk.core.node as fabll
+from atopile.errors import UserException, _make_traceback_dict, serialize_source_chunk
 from atopile.logging_utils import safe_markdown
 
 
@@ -94,8 +95,12 @@ class DslUndefinedSymbolError(DslException):
 # ... map remaining User* types
 
 
-class DslRichException(DslException):
-    """Exception with full DSL context. Created by enriching DslException."""
+class DslRichException(UserException, DslException):
+    """Exception with full DSL context. Created by enriching DslException.
+
+    Extends UserException so it participates in the structured traceback
+    system (serialize_traceback) and is handled by the DB log handler.
+    """
 
     def __init__(
         self,
@@ -109,16 +114,17 @@ class DslRichException(DslException):
     ):
         from atopile.compiler.ast_visitor import ASTVisitor
 
-        super().__init__(message)
+        UserException.__init__(self, message, markdown=True)
 
         if file_path is None:
             file_path = ASTVisitor._extract_filepath_from_source_node(source_node)
 
-        self.message = message
         self.original = original
-        self.source_node = source_node
         self.file_path = file_path
-        self.traceback = traceback or []
+        self.dsl_traceback = traceback or []
+
+        if source_node is not None:
+            self.source_chunk = ASTVisitor.get_source_chunk(source_node.instance)
 
     @property
     def title(self) -> str:
@@ -127,9 +133,28 @@ class DslRichException(DslException):
             return type(self.original).__name__.removeprefix("Dsl")
         return "Exception"
 
+    def serialize_traceback(self) -> dict:
+        from atopile.compiler.ast_visitor import ASTVisitor
+
+        def _node_to_frame(node: fabll.Node | None) -> dict | None:
+            if node is None:
+                return None
+            chunk = ASTVisitor.get_source_chunk(node.instance)
+            return serialize_source_chunk(chunk) if chunk else None
+
+        frames = [
+            f
+            for frame in self.dsl_traceback
+            if (f := _node_to_frame(frame.source_node)) is not None
+        ]
+        origin = (
+            serialize_source_chunk(self.source_chunk) if self.source_chunk else None
+        )
+        return _make_traceback_dict(self, frames=frames, origin=origin)
+
     def add_import_frame(self, import_node: fabll.Node, file_path: Path) -> None:
         """Add an import frame when exception propagates across file boundary."""
-        self.traceback.append(
+        self.dsl_traceback.append(
             DSLTracebackFrame(source_node=import_node, file_path=file_path)
         )
 
@@ -248,22 +273,14 @@ class DslRichException(DslException):
         yield Text(self.title, style="bold red")
         yield safe_markdown(self.message, console)
 
-        from atopile.compiler.ast_visitor import ASTVisitor
-
-        if self.traceback and not self.source_node:
+        if self.dsl_traceback and not self.source_chunk:
             yield Text("\nTraceback (most recent call last):", style="bold")
-            for frame in self.traceback:
+            for frame in self.dsl_traceback:
                 yield from self._render_traceback_frame(frame)
 
-        if self.source_node:
-            source_chunk = ASTVisitor.get_source_chunk(self.source_node.instance)
+        if self.source_chunk:
             yield Text("\nCode causing the error:", style="bold")
-            if source_chunk is None:
-                yield Text(
-                    f"Source not available for {self.source_node}", style="dim italic"
-                )
-            else:
-                yield from self._render_ast_source(source_chunk, self.file_path)
+            yield from self._render_ast_source(self.source_chunk, self.file_path)
 
 
 def _try_relative_path(path: Path | None) -> str:

@@ -1,0 +1,169 @@
+.stackup-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+  overflow: hidden;
+}
+
+.stackup-state {
+  padding: 12px 0 16px;
+}
+
+.stackup-state-alert {
+  padding-top: 12px;
+}
+
+.stackup-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+  font-size: var(--font-size-xs);
+  opacity: 0.85;
+}
+
+.stackup-summary-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stackup-summary-label {
+  opacity: 0.7;
+}
+
+.stackup-summary-value {
+  font-weight: 500;
+}
+
+.stackup-body {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+}
+
+/* Cross-section visualization */
+.stackup-cross-section {
+  width: 25%;
+  min-width: 40px;
+  flex-shrink: 0;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-right: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+}
+
+.stackup-table-wrapper {
+  width: 75%;
+  flex: 1;
+  overflow: auto;
+}
+
+.stackup-layer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 4px;
+  width: 100%;
+  border-radius: 2px;
+  font-size: var(--font-size-xxs);
+  color: rgba(0, 0, 0, 0.7);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+  transition: filter 0.05s ease;
+  box-sizing: border-box;
+}
+
+.stackup-layer-bar:hover,
+.stackup-layer-bar.highlighted {
+  filter: brightness(1.15);
+  outline: 1px solid var(--vscode-focusBorder, rgba(128, 128, 128, 0.5));
+  outline-offset: -1px;
+}
+
+.stackup-layer-bar-label {
+  padding: 0 4px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+/* Layer table */
+.stackup-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-xs);
+}
+
+.stackup-table th {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+  opacity: 0.7;
+  font-weight: 500;
+  position: sticky;
+  top: 0;
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+.stackup-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.1));
+  font-variant-numeric: tabular-nums;
+}
+
+.stackup-table tr:hover td,
+.stackup-table tr.highlighted td {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.1));
+}
+
+.stackup-table .type-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: var(--font-size-xxs);
+  font-weight: 500;
+}
+
+.stackup-table .type-copper {
+  background: rgba(232, 196, 160, 0.25);
+  color: var(--vscode-charts-orange, #e8a060);
+}
+
+.stackup-table .type-core,
+.stackup-table .type-prepreg {
+  background: rgba(140, 200, 140, 0.2);
+  color: var(--vscode-charts-green, #8cc88c);
+}
+
+.stackup-table .type-mask {
+  background: rgba(100, 180, 180, 0.2);
+  color: var(--vscode-charts-blue, #64b4b4);
+}
+
+.stackup-table .type-silk {
+  background: rgba(180, 170, 210, 0.2);
+  color: var(--vscode-charts-purple, #b4aad2);
+}
+
+.stackup-table .type-default {
+  background: rgba(128, 128, 128, 0.15);
+  color: var(--vscode-foreground);
+  opacity: 0.7;
+}
+
+.stackup-color-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}

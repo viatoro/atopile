@@ -6,8 +6,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from textwrap import indent
 
-from atopile.compiler.ast_visitor import ASTVisitor
-
 logger = logging.getLogger(__name__)
 
 
@@ -43,8 +41,6 @@ class AtoCodeGen:
     class Import:
         name: str
         path: Path | None = None
-
-    Experiment = ASTVisitor._Experiment
 
     @dataclass(kw_only=True)
     class Statement:
@@ -122,7 +118,6 @@ class AtoCodeGen:
     class ComponentFile:
         identifier: str | None = None
         imports: set["AtoCodeGen.Import"] = field(default_factory=set)
-        experiments: set["AtoCodeGen.Experiment"] = field(default_factory=set)
         stmts: list["AtoCodeGen.Statement"] = field(default_factory=list)
         docstring: str | None = None
 
@@ -131,9 +126,6 @@ class AtoCodeGen:
                 raise ValueError("identifier is required")
 
             out = _StrBuilder()
-
-            for exp in self.experiments:
-                out.append_line(f'#pragma experiment("{exp.value}")')
 
             for imp in sorted(self.imports, key=lambda x: x.name):
                 if imp.path:
@@ -167,8 +159,6 @@ class AtoCodeGen:
             auto_import: bool = True,
             **args: str | None,
         ) -> "AtoCodeGen.Trait":
-            self.enable_experiment(AtoCodeGen.Experiment.TRAITS)
-
             if auto_import:
                 self.imports.add(AtoCodeGen.Import(name))
 
@@ -179,9 +169,6 @@ class AtoCodeGen:
             )
             self.add_stmt(trait)
             return trait
-
-        def enable_experiment(self, experiment: "AtoCodeGen.Experiment") -> None:
-            self.experiments.add(experiment)
 
         def add_stmts(
             self, *stmts: "AtoCodeGen.Statement", use_spacer: bool = True

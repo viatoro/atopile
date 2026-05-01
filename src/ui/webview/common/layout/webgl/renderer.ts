@@ -1,0 +1,828 @@
+import { Vec2, Matrix3, BBox } from "../math";
+import { ShaderProgram, VertexArray, Buffer } from "./helpers";
+import { polygon_vert, polygon_frag, polyline_vert, polyline_frag, point_vert, point_frag, blit_vert, blit_frag } from "./shaders";
+import { hatch_polygon_vert, hatch_polygon_frag, hatch_polyline_vert, hatch_polyline_frag, hatch_pathline_vert, hatch_pathline_frag, glow_polygon_frag, glow_polyline_frag } from "./hatch_shaders";
+import {
+    tessellate_polyline, tessellate_circle, triangulate_polygon,
+    type TessPolylineResult, type TessCircleResult, type TessPolygonResult,
+} from "./tessellator";
+
+const GRID_MAX_DOTS = 100_000;
+const GRID_POINT_SIZE_FACTOR = 2.0;
+const GRID_POINT_ALPHA = 0.15;
+/** Screen-space dot spacing (px) at which grid is fully visible */
+const GRID_FADE_IN_PX = 16;
+/** Screen-space dot spacing (px) at which grid becomes invisible */
+const GRID_FADE_OUT_PX = 6;
+const POINT_DEPTH = 0.00001;
+
+/** A set of GPU-uploaded primitives for one render layer */
+class PrimitiveSet {
+    #polyline_data: Array<{ data: TessPolylineResult; ownerId: string | null }> = [];
+    #circle_data: Array<{ data: TessCircleResult; ownerId: string | null }> = [];
+    #polygon_data: Array<{ data: TessPolygonResult; ownerId: string | null }> = [];
+
+    // committed GPU state
+    #poly_vao?: VertexArray;
+    #poly_pos_buf?: Buffer;
+    #poly_color_buf?: Buffer;
+    #poly_vertex_count = 0;
+
+    #line_vao?: VertexArray;
+    #line_pos_buf?: Buffer;
+    #line_cap_buf?: Buffer;
+    #line_color_buf?: Buffer;
+    #line_path_dist_buf?: Buffer;
+    #line_vertex_count = 0;
+    #line_path_dists?: Float32Array;
+    #line_chunks: Array<{ offset: number; count: number; ownerId: string | null }> = [];
+    #poly_chunks: Array<{ offset: number; count: number; ownerId: string | null }> = [];
+
+    constructor(private gl: WebGL2RenderingContext) {}
+
+    add_polyline(
+        points: Vec2[],
+        width: number,
+        r: number,
+        g: number,
+        b: number,
+        a: number,
+        ownerId: string | null = null,
+        pathDistOffset: number = 0,
+    ): number {
+        if (points.length < 2) return pathDistOffset;
+        const data = tessellate_polyline(points, width, r, g, b, a, pathDistOffset);
+        this.#polyline_data.push({ data, ownerId });
+        return data.totalPathDist;
+    }
+
+    add_circle(
+        cx: number,
+        cy: number,
+        radius: number,
+        r: number,
+        g: number,
+        b: number,
+        a: number,
+        ownerId: string | null = null,
+    ) {
+        this.#circle_data.push({ data: tessellate_circle(cx, cy, radius, r, g, b, a), ownerId });
+    }
+
+    add_polygon(points: Vec2[], r: number, g: number, b: number, a: number, ownerId: string | null = null) {
+        if (points.length < 3) return;
+        this.#polygon_data.push({ data: triangulate_polygon([points], r, g, b, a), ownerId });
+    }
+
+    add_polygon_with_holes(
+        outer: Vec2[],
+        holes: Vec2[][],
+        r: number,
+        g: number,
+        b: number,
+        a: number,
+        ownerId: string | null = null,
+    ) {
+        if (outer.length < 3) return;
+        this.#polygon_data.push({ data: triangulate_polygon([outer, ...holes.filter((hole) => hole.length >= 3)], r, g, b, a), ownerId });
+    }
+
+    /** Upload all collected data to GPU */
+    commit(polylineShader: ShaderProgram, polygonShader: ShaderProgram) {
+        // Merge and upload polylines + circles (share the same shader)
+        const lineItems = [...this.#polyline_data, ...this.#circle_data];
+        this.#line_chunks = [];
+        if (lineItems.length > 0) {
+            let totalVerts = 0;
+            for (const item of lineItems) totalVerts += item.data.vertexCount;
+
+            const pos = new Float32Array(totalVerts * 2);
+            const cap = new Float32Array(totalVerts);
+            const col = new Float32Array(totalVerts * 4);
+            const pathDist = new Float32Array(totalVerts);
+            let pi = 0, ci = 0, coli = 0, pdi = 0, vi = 0;
+
+            for (const item of lineItems) {
+                const data = item.data;
+                pos.set(data.positions, pi); pi += data.positions.length;
+                cap.set(data.caps, ci); ci += data.caps.length;
+                col.set(data.colors, coli); coli += data.colors.length;
+                pathDist.set(data.pathDists, pdi); pdi += data.pathDists.length;
+                this.#line_chunks.push({ offset: vi, count: data.vertexCount, ownerId: item.ownerId });
+                vi += data.vertexCount;
+            }
+
+            this.#line_vao = new VertexArray(this.gl);
+            this.#line_pos_buf = this.#line_vao.buffer(polylineShader.attribs["a_position"]!, 2);
+            this.#line_pos_buf.set(pos);
+            this.#line_cap_buf = this.#line_vao.buffer(polylineShader.attribs["a_cap_region"]!, 1);
+            this.#line_cap_buf.set(cap);
+            this.#line_color_buf = this.#line_vao.buffer(polylineShader.attribs["a_color"]!, 4);
+            this.#line_color_buf.set(col);
+            this.#line_vertex_count = totalVerts;
+            this.#line_path_dists = pathDist;
+        }
+
+        // Merge and upload polygons
+        this.#poly_chunks = [];
+        if (this.#polygon_data.length > 0) {
+            let totalVerts = 0;
+            for (const item of this.#polygon_data) totalVerts += item.data.vertexCount;
+
+            const pos = new Float32Array(totalVerts * 2);
+            const col = new Float32Array(totalVerts * 4);
+            let pi = 0, coli = 0, vi = 0;
+
+            for (const item of this.#polygon_data) {
+                const data = item.data;
+                pos.set(data.positions, pi); pi += data.positions.length;
+                col.set(data.colors, coli); coli += data.colors.length;
+                this.#poly_chunks.push({ offset: vi, count: data.vertexCount, ownerId: item.ownerId });
+                vi += data.vertexCount;
+            }
+
+            this.#poly_vao = new VertexArray(this.gl);
+            this.#poly_pos_buf = this.#poly_vao.buffer(polygonShader.attribs["a_position"]!, 2);
+            this.#poly_pos_buf.set(pos);
+            this.#poly_color_buf = this.#poly_vao.buffer(polygonShader.attribs["a_color"]!, 4);
+            this.#poly_color_buf.set(col);
+            this.#poly_vertex_count = totalVerts;
+        }
+
+        // Free CPU data
+        this.#polyline_data = [];
+        this.#circle_data = [];
+        this.#polygon_data = [];
+    }
+
+    private draw_filtered_chunks(
+        chunks: Array<{ offset: number; count: number; ownerId: string | null }>,
+        skippedOwners: Set<string>,
+    ) {
+        let runStart = -1;
+        let runCount = 0;
+        const flush = () => {
+            if (runCount <= 0) return;
+            this.gl.drawArrays(this.gl.TRIANGLES, runStart, runCount);
+            runStart = -1;
+            runCount = 0;
+        };
+        for (const chunk of chunks) {
+            const shouldSkip = chunk.ownerId !== null && skippedOwners.has(chunk.ownerId);
+            if (shouldSkip) {
+                flush();
+                continue;
+            }
+            if (runCount === 0) {
+                runStart = chunk.offset;
+                runCount = chunk.count;
+                continue;
+            }
+            if ((runStart + runCount) === chunk.offset) {
+                runCount += chunk.count;
+                continue;
+            }
+            flush();
+            runStart = chunk.offset;
+            runCount = chunk.count;
+        }
+        flush();
+    }
+
+    render(
+        polylineShader: ShaderProgram,
+        polygonShader: ShaderProgram,
+        matrix: Matrix3,
+        depth: number,
+        alpha: number,
+        skippedOwners?: Set<string>,
+    ) {
+        const hasSkips = !!skippedOwners && skippedOwners.size > 0;
+        if (this.#poly_vertex_count > 0) {
+            polygonShader.bind();
+            polygonShader.uniforms["u_matrix"]!.mat3f(false, matrix.elements);
+            polygonShader.uniforms["u_depth"]!.f1(depth);
+            polygonShader.uniforms["u_alpha"]!.f1(alpha);
+            this.#poly_vao!.bind();
+            if (!hasSkips) {
+                this.gl.drawArrays(this.gl.TRIANGLES, 0, this.#poly_vertex_count);
+            } else {
+                this.draw_filtered_chunks(this.#poly_chunks, skippedOwners!);
+            }
+        }
+
+        if (this.#line_vertex_count > 0) {
+            polylineShader.bind();
+            polylineShader.uniforms["u_matrix"]!.mat3f(false, matrix.elements);
+            polylineShader.uniforms["u_depth"]!.f1(depth);
+            polylineShader.uniforms["u_alpha"]!.f1(alpha);
+            this.#line_vao!.bind();
+            if (!hasSkips) {
+                this.gl.drawArrays(this.gl.TRIANGLES, 0, this.#line_vertex_count);
+            } else {
+                this.draw_filtered_chunks(this.#line_chunks, skippedOwners!);
+            }
+        }
+    }
+
+    render_hatch(
+        hatchPolyShader: ShaderProgram,
+        hatchLineShader: ShaderProgram,
+        matrix: Matrix3,
+        depth: number,
+        alpha: number,
+        time: number,
+        spacing: number,
+        width: number,
+        hatchPathLineShader?: ShaderProgram,
+    ) {
+        if (this.#poly_vertex_count > 0) {
+            hatchPolyShader.bind();
+            hatchPolyShader.uniforms["u_matrix"]!.mat3f(false, matrix.elements);
+            hatchPolyShader.uniforms["u_depth"]!.f1(depth);
+            hatchPolyShader.uniforms["u_alpha"]!.f1(alpha);
+            hatchPolyShader.uniforms["u_time"]!.f1(time);
+            hatchPolyShader.uniforms["u_spacing"]!.f1(spacing);
+            hatchPolyShader.uniforms["u_width"]!.f1(width);
+            this.#poly_vao!.bind();
+            this.gl.drawArrays(this.gl.TRIANGLES, 0, this.#poly_vertex_count);
+        }
+
+        if (this.#line_vertex_count > 0) {
+            // Upload path dist buffer lazily on first hatch render
+            if (hatchPathLineShader && this.#line_path_dists && !this.#line_path_dist_buf) {
+                this.#line_path_dist_buf = new Buffer(this.gl);
+                this.#line_path_dist_buf.set(this.#line_path_dists);
+                this.#line_path_dists = undefined; // free CPU data
+            }
+            const usePathShader = !!(hatchPathLineShader && this.#line_path_dist_buf);
+            const lineShader = usePathShader ? hatchPathLineShader : hatchLineShader;
+            lineShader.bind();
+            lineShader.uniforms["u_matrix"]!.mat3f(false, matrix.elements);
+            lineShader.uniforms["u_depth"]!.f1(depth);
+            lineShader.uniforms["u_alpha"]!.f1(alpha);
+            lineShader.uniforms["u_time"]!.f1(time);
+            lineShader.uniforms["u_spacing"]!.f1(spacing);
+            lineShader.uniforms["u_width"]!.f1(width);
+            this.#line_vao!.bind();
+            if (usePathShader) {
+                this.#line_path_dist_buf!.bind_attrib(hatchPathLineShader!.attribs["a_path_dist"]!);
+            }
+            this.gl.drawArrays(this.gl.TRIANGLES, 0, this.#line_vertex_count);
+        }
+    }
+
+    render_glow(
+        glowLineShader: ShaderProgram,
+        glowPolyShader: ShaderProgram,
+        matrix: Matrix3,
+        time: number,
+    ) {
+        if (this.#poly_vertex_count > 0) {
+            glowPolyShader.bind();
+            glowPolyShader.uniforms["u_matrix"]!.mat3f(false, matrix.elements);
+            glowPolyShader.uniforms["u_time"]!.f1(time);
+            this.#poly_vao!.bind();
+            this.gl.drawArrays(this.gl.TRIANGLES, 0, this.#poly_vertex_count);
+        }
+
+        if (this.#line_vertex_count > 0) {
+            glowLineShader.bind();
+            glowLineShader.uniforms["u_matrix"]!.mat3f(false, matrix.elements);
+            glowLineShader.uniforms["u_time"]!.f1(time);
+            this.#line_vao!.bind();
+            this.gl.drawArrays(this.gl.TRIANGLES, 0, this.#line_vertex_count);
+        }
+    }
+
+    dispose() {
+        this.#poly_vao?.dispose();
+        this.#line_vao?.dispose();
+        this.#line_path_dist_buf?.dispose();
+    }
+
+    stats() {
+        return {
+            lineVertices: this.#line_vertex_count,
+            polyVertices: this.#poly_vertex_count,
+        };
+    }
+}
+
+/** A named render layer with its own PrimitiveSet */
+export class RenderLayer {
+    geometry: PrimitiveSet;
+    depth: number;
+    visible: boolean = true;
+    transform: Matrix3 | null = null;
+
+    constructor(
+        private gl: WebGL2RenderingContext,
+        public name: string,
+        depth: number,
+    ) {
+        this.geometry = new PrimitiveSet(gl);
+        this.depth = depth;
+    }
+
+    commit(polylineShader: ShaderProgram, polygonShader: ShaderProgram) {
+        this.geometry.commit(polylineShader, polygonShader);
+    }
+
+    render(
+        polylineShader: ShaderProgram,
+        polygonShader: ShaderProgram,
+        matrix: Matrix3,
+        alpha = 1,
+        skippedOwners?: Set<string>,
+    ) {
+        if (!this.visible) return;
+        const m = this.transform ? matrix.multiply(this.transform) : matrix;
+        this.geometry.render(polylineShader, polygonShader, m, this.depth, alpha, skippedOwners);
+    }
+
+    dispose() {
+        this.geometry.dispose();
+    }
+
+    stats() {
+        return this.geometry.stats();
+    }
+}
+
+/** Retained-mode WebGL2 renderer */
+export class Renderer {
+    gl: WebGL2RenderingContext;
+    canvas: HTMLCanvasElement;
+    layers: Map<string, RenderLayer> = new Map();
+    dynamicLayers: RenderLayer[] = [];
+    dynamicLayersMap: Map<string, RenderLayer> = new Map();
+    isDynamicContext: boolean = false;
+    private hatchDynamicLayers: Set<RenderLayer> = new Set();
+    private pathHatchLayers: Set<RenderLayer> = new Set();
+    projection_matrix: Matrix3 = Matrix3.identity();
+
+    private polylineShader!: ShaderProgram;
+    private polygonShader!: ShaderProgram;
+    private pointShader!: ShaderProgram;
+    private blitShader!: ShaderProgram;
+    private hatchPolyShader!: ShaderProgram;
+    private hatchLineShader!: ShaderProgram;
+    private hatchPathLineShader!: ShaderProgram;
+    private glowPolyShader!: ShaderProgram;
+    private glowLineShader!: ShaderProgram;
+    private glowDynamicLayers: Set<RenderLayer> = new Set();
+    private static readonly DEPTH_STEP = 0.0001;
+    private static readonly DYNAMIC_DEPTH_LIFT = 0.2;
+    private nextDepth = Renderer.DEPTH_STEP;
+    private dynamicFallbackDepth = 0.8;
+    private gridVao: VertexArray | null = null;
+    private gridPosBuf: Buffer | null = null;
+    private gridVertexCount = 0;
+    private lastGridBBox: BBox | null = null;
+    private lastGridSpacing = 0;
+    private gridAlpha = 0;
+    private blitVao: VertexArray | null = null;
+    private dragCacheTex: WebGLTexture | null = null;
+    private dragCacheFbo: WebGLFramebuffer | null = null;
+    private dragCacheDepth: WebGLRenderbuffer | null = null;
+    private dragCacheWidth = 0;
+    private dragCacheHeight = 0;
+    private useDragCache = false;
+
+    constructor(canvas: HTMLCanvasElement) {
+        this.canvas = canvas;
+        const gl = canvas.getContext("webgl2");
+        if (!gl) throw new Error("WebGL2 not available");
+        this.gl = gl;
+    }
+
+    setup() {
+        const gl = this.gl;
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.GREATER);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clearDepth(0);
+
+        this.polylineShader = new ShaderProgram(gl, polyline_vert, polyline_frag);
+        this.polygonShader = new ShaderProgram(gl, polygon_vert, polygon_frag);
+        this.pointShader = new ShaderProgram(gl, point_vert, point_frag);
+        this.blitShader = new ShaderProgram(gl, blit_vert, blit_frag);
+        this.hatchPolyShader = new ShaderProgram(gl, hatch_polygon_vert, hatch_polygon_frag);
+        this.hatchLineShader = new ShaderProgram(gl, hatch_polyline_vert, hatch_polyline_frag);
+        this.hatchPathLineShader = new ShaderProgram(gl, hatch_pathline_vert, hatch_pathline_frag);
+        this.glowPolyShader = new ShaderProgram(gl, hatch_polygon_vert, glow_polygon_frag);
+        this.glowLineShader = new ShaderProgram(gl, hatch_polyline_vert, glow_polyline_frag);
+
+        this.update_size();
+    }
+
+    update_size() {
+        const dpr = window.devicePixelRatio;
+        const rect = this.canvas.getBoundingClientRect();
+        const pw = Math.round(rect.width * dpr);
+        const ph = Math.round(rect.height * dpr);
+        if (this.canvas.width === pw && this.canvas.height === ph) return;
+        this.canvas.width = pw;
+        this.canvas.height = ph;
+        this.gl.viewport(0, 0, pw, ph);
+        this.projection_matrix = Matrix3.orthographic(rect.width, rect.height);
+        this.useDragCache = false;
+        this.dragCacheWidth = 0;
+        this.dragCacheHeight = 0;
+    }
+
+    clear() {
+        this.update_size();
+        this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
+    }
+
+    /** Remove all layers and free GPU resources */
+    dispose_layers() {
+        for (const layer of this.layers.values()) layer.dispose();
+        this.layers.clear();
+        this.nextDepth = Renderer.DEPTH_STEP;
+        this.end_fast_drag_cache();
+        this.dispose_dynamic_layers();
+    }
+
+    dispose_dynamic_layers() {
+        for (const layer of this.dynamicLayers) layer.dispose();
+        this.dynamicLayers = [];
+        this.dynamicLayersMap.clear();
+        this.hatchDynamicLayers.clear();
+        this.pathHatchLayers.clear();
+        this.glowDynamicLayers.clear();
+        this.dynamicFallbackDepth = 0.8;
+    }
+
+    dispose_dynamic_overlays() {
+        const contextLayers = new Set(this.dynamicLayersMap.values());
+        const remaining: RenderLayer[] = [];
+        for (const layer of this.dynamicLayers) {
+            if (contextLayers.has(layer)) {
+                remaining.push(layer);
+            } else {
+                layer.dispose();
+                this.hatchDynamicLayers.delete(layer);
+                this.pathHatchLayers.delete(layer);
+                this.glowDynamicLayers.delete(layer);
+            }
+        }
+        this.dynamicLayers = remaining;
+    }
+
+    get_layer(name: string): RenderLayer {
+        if (this.isDynamicContext) {
+            let layer = this.dynamicLayersMap.get(name);
+            if (!layer) {
+                const staticDepth = this.layers.get(name)?.depth;
+                const liftedDepth = staticDepth !== undefined
+                    ? Math.min(0.9998, staticDepth + Renderer.DYNAMIC_DEPTH_LIFT)
+                    : this.dynamicFallbackDepth;
+                this.dynamicFallbackDepth = Math.min(0.9998, this.dynamicFallbackDepth + Renderer.DEPTH_STEP);
+                layer = new RenderLayer(this.gl, "dyn_" + name, liftedDepth);
+                this.dynamicLayersMap.set(name, layer);
+                this.dynamicLayers.push(layer);
+            }
+            return layer;
+        }
+        let layer = this.layers.get(name);
+        if (!layer) {
+            layer = new RenderLayer(this.gl, name, this.nextDepth);
+            this.nextDepth = Math.min(0.9999, this.nextDepth + Renderer.DEPTH_STEP);
+            this.layers.set(name, layer);
+        }
+        return layer;
+    }
+
+    set_layer_visible(name: string, visible: boolean) {
+        for (const [layerName, layer] of this.layers) {
+            if (
+                layerName === name
+                || layerName === `zone:${name}`
+                || layerName === `pad-highlight:${name}`
+            ) {
+                layer.visible = visible;
+            }
+        }
+    }
+
+    set_layer_transform(name: string, transform: Matrix3 | null) {
+        const layer = this.layers.get(name);
+        if (layer) layer.transform = transform;
+    }
+
+    commit_all_layers() {
+        for (const layer of this.layers.values()) {
+            layer.commit(this.polylineShader, this.polygonShader);
+        }
+    }
+
+    start_dynamic_layer(name: string): RenderLayer {
+        const layer = new RenderLayer(this.gl, name, 1.0); // Draw on top
+        this.dynamicLayers.push(layer);
+        return layer;
+    }
+
+    commit_dynamic_layer(layer: RenderLayer) {
+        layer.commit(this.polylineShader, this.polygonShader);
+    }
+
+    commit_dynamic_hatch_layer(layer: RenderLayer) {
+        layer.commit(this.hatchLineShader, this.hatchPolyShader);
+    }
+
+    commit_dynamic_hatch_layers(usePathShader: boolean = false) {
+        const lineShader = usePathShader ? this.hatchPathLineShader : this.hatchLineShader;
+        for (const layer of this.dynamicLayersMap.values()) {
+            layer.commit(lineShader, this.hatchPolyShader);
+            this.hatchDynamicLayers.add(layer);
+            if (usePathShader) this.pathHatchLayers.add(layer);
+        }
+        this.dynamicLayersMap.clear();
+    }
+
+    commit_dynamic_glow_layers() {
+        for (const layer of this.dynamicLayersMap.values()) {
+            layer.commit(this.glowLineShader, this.glowPolyShader);
+            this.glowDynamicLayers.add(layer);
+        }
+        this.dynamicLayersMap.clear();
+    }
+
+    commit_dynamic_context_layers() {
+        for (const layer of this.dynamicLayersMap.values()) {
+            layer.commit(this.polylineShader, this.polygonShader);
+        }
+    }
+
+    get_layer_stats(): Record<string, { lineVertices: number; polyVertices: number; visible: boolean; depth: number }> {
+        const stats: Record<string, { lineVertices: number; polyVertices: number; visible: boolean; depth: number }> = {};
+        for (const [name, layer] of this.layers.entries()) {
+            const layerStats = layer.stats();
+            stats[name] = {
+                lineVertices: layerStats.lineVertices,
+                polyVertices: layerStats.polyVertices,
+                visible: layer.visible,
+                depth: layer.depth,
+            };
+        }
+        return stats;
+    }
+
+    private ensure_drag_cache_target(w: number, h: number): boolean {
+        const gl = this.gl;
+        if (!this.dragCacheTex) {
+            this.dragCacheTex = gl.createTexture();
+        }
+        if (!this.dragCacheFbo) {
+            this.dragCacheFbo = gl.createFramebuffer();
+        }
+        if (!this.dragCacheDepth) {
+            this.dragCacheDepth = gl.createRenderbuffer();
+        }
+        if (!this.dragCacheTex || !this.dragCacheFbo || !this.dragCacheDepth) {
+            return false;
+        }
+        if (this.dragCacheWidth === w && this.dragCacheHeight === h) {
+            return true;
+        }
+        gl.bindTexture(gl.TEXTURE_2D, this.dragCacheTex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+
+        gl.bindRenderbuffer(gl.RENDERBUFFER, this.dragCacheDepth);
+        gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.dragCacheFbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.dragCacheTex, 0);
+        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.dragCacheDepth);
+        const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+
+        if (status !== gl.FRAMEBUFFER_COMPLETE) {
+            return false;
+        }
+        this.dragCacheWidth = w;
+        this.dragCacheHeight = h;
+        return true;
+    }
+
+    begin_fast_drag_cache(cameraMatrix: Matrix3, skippedOwners?: Set<string>): boolean {
+        this.update_size();
+        const gl = this.gl;
+        const w = this.canvas.width;
+        const h = this.canvas.height;
+        if (w <= 0 || h <= 0) {
+            this.useDragCache = false;
+            return false;
+        }
+        if (!this.ensure_drag_cache_target(w, h) || !this.dragCacheFbo) {
+            this.useDragCache = false;
+            return false;
+        }
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.dragCacheFbo);
+        gl.viewport(0, 0, w, h);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        const total = this.projection_matrix.multiply(cameraMatrix);
+        this.render_static_scene(total, skippedOwners);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, w, h);
+        this.useDragCache = true;
+        return true;
+    }
+
+    end_fast_drag_cache() {
+        this.useDragCache = false;
+    }
+
+    private ensure_blit_vao() {
+        if (this.blitVao) return;
+        const vao = new VertexArray(this.gl);
+        const posBuf = vao.buffer(this.blitShader.attribs["a_position"]!, 2);
+        posBuf.set(new Float32Array([
+            -1, -1,
+             1, -1,
+            -1,  1,
+            -1,  1,
+             1, -1,
+             1,  1,
+        ]));
+        const uvBuf = vao.buffer(this.blitShader.attribs["a_uv"]!, 2);
+        uvBuf.set(new Float32Array([
+            0, 0,
+            1, 0,
+            0, 1,
+            0, 1,
+            1, 0,
+            1, 1,
+        ]));
+        this.blitVao = vao;
+    }
+
+    private draw_drag_cache() {
+        if (!this.useDragCache || !this.dragCacheTex) return false;
+        const gl = this.gl;
+        this.ensure_blit_vao();
+        gl.disable(gl.DEPTH_TEST);
+        gl.disable(gl.BLEND);
+        this.blitShader.bind();
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.dragCacheTex);
+        this.blitShader.uniforms["u_tex"]!.i1(0);
+        this.blitVao!.bind();
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        gl.enable(gl.BLEND);
+        gl.enable(gl.DEPTH_TEST);
+        gl.clear(gl.DEPTH_BUFFER_BIT);
+        return true;
+    }
+
+    private render_static_scene(total: Matrix3, skippedOwners?: Set<string>, layerAlphaOverrides?: Map<string, number>) {
+        // Draw grid dots behind everything
+        if (this.gridVertexCount > 0 && this.gridAlpha > 0) {
+            this.pointShader.bind();
+            this.pointShader.uniforms["u_matrix"]!.mat3f(false, total.elements);
+            this.pointShader.uniforms["u_pointSize"]!.f1(GRID_POINT_SIZE_FACTOR * window.devicePixelRatio);
+            this.pointShader.uniforms["u_color"]!.f4(1.0, 1.0, 1.0, this.gridAlpha);
+            this.gridVao!.bind();
+            this.gl.drawArrays(this.gl.POINTS, 0, this.gridVertexCount);
+        }
+        for (const layer of this.layers.values()) {
+            const alpha = layerAlphaOverrides?.get(layer.name) ?? 1.0;
+            if (alpha <= 0) continue;
+            layer.render(this.polylineShader, this.polygonShader, total, alpha, skippedOwners);
+        }
+    }
+
+    /** Build grid vertex data for the visible area */
+    updateGrid(viewBBox: BBox, spacing: number, zoom: number) {
+        // Compute grid opacity based on screen-space dot spacing
+        const screenSpacing = spacing * zoom;
+        if (screenSpacing <= GRID_FADE_OUT_PX) {
+            this.gridAlpha = 0;
+            this.gridVertexCount = 0;
+            return;
+        }
+        const t = Math.min((screenSpacing - GRID_FADE_OUT_PX) / (GRID_FADE_IN_PX - GRID_FADE_OUT_PX), 1);
+        this.gridAlpha = GRID_POINT_ALPHA * t;
+
+        const b = this.lastGridBBox;
+        if (b && this.lastGridSpacing === spacing
+            && b.x === viewBBox.x && b.y === viewBBox.y
+            && b.w === viewBBox.w && b.h === viewBBox.h) {
+            return;
+        }
+        this.lastGridBBox = new BBox(viewBBox.x, viewBBox.y, viewBBox.w, viewBBox.h);
+        this.lastGridSpacing = spacing;
+        const maxDots = GRID_MAX_DOTS;
+        const cols = Math.floor(viewBBox.w / spacing) + 2;
+        const rows = Math.floor(viewBBox.h / spacing) + 2;
+        if (cols * rows > maxDots || cols <= 0 || rows <= 0) {
+            this.gridVertexCount = 0;
+            return;
+        }
+
+        const startX = Math.floor(viewBBox.x / spacing) * spacing;
+        const startY = Math.floor(viewBBox.y / spacing) * spacing;
+        const data = new Float32Array(cols * rows * 2);
+        let i = 0;
+        for (let r = 0; r < rows; r++) {
+            const y = startY + r * spacing;
+            for (let c = 0; c < cols; c++) {
+                data[i++] = startX + c * spacing;
+                data[i++] = y;
+            }
+        }
+
+        if (!this.gridVao) {
+            this.gridVao = new VertexArray(this.gl);
+            this.gridPosBuf = this.gridVao.buffer(this.pointShader.attribs["a_position"]!, 2);
+        }
+        this.gridPosBuf!.set(data.subarray(0, i));
+        this.gridVertexCount = i / 2;
+    }
+
+    /** Draw all layers with the given camera transform */
+    draw(cameraMatrix: Matrix3, layerAlphaOverrides?: Map<string, number>) {
+        this.clear();
+        const total = this.projection_matrix.multiply(cameraMatrix);
+
+        const drewCache = this.draw_drag_cache();
+        if (!drewCache) {
+            this.render_static_scene(total, undefined, layerAlphaOverrides);
+        }
+        for (const layer of this.dynamicLayers) {
+            if (this.hatchDynamicLayers.has(layer) || this.glowDynamicLayers.has(layer)) continue;
+            layer.render(this.polylineShader, this.polygonShader, total, 1.0);
+        }
+    }
+
+    get has_hatch_layers(): boolean { return this.hatchDynamicLayers.size > 0; }
+    get has_glow_layers(): boolean { return this.glowDynamicLayers.size > 0; }
+
+    /** Draw all dynamic hatch layers with the hatch shader */
+    draw_hatch_layers(
+        cameraMatrix: Matrix3,
+        alpha: number,
+        time: number,
+        spacing: number,
+        stripeWidth: number,
+    ) {
+        if (this.hatchDynamicLayers.size === 0) return;
+        const total = this.projection_matrix.multiply(cameraMatrix);
+        for (const layer of this.hatchDynamicLayers) {
+            if (!layer.visible) continue;
+            const m = layer.transform ? total.multiply(layer.transform) : total;
+            const pathShader = this.pathHatchLayers.has(layer) ? this.hatchPathLineShader : undefined;
+            layer.geometry.render_hatch(
+                this.hatchPolyShader,
+                this.hatchLineShader,
+                m,
+                layer.depth,
+                alpha,
+                time,
+                spacing,
+                stripeWidth,
+                pathShader,
+            );
+        }
+    }
+
+    /** Draw glow layers as a pure overlay (no depth interaction) */
+    draw_glow_layers(
+        cameraMatrix: Matrix3,
+        alpha: number,
+        time: number,
+    ) {
+        if (this.glowDynamicLayers.size === 0) return;
+        const gl = this.gl;
+        const total = this.projection_matrix.multiply(cameraMatrix);
+
+        // Disable depth so glow doesn't interfere with other layers
+        gl.disable(gl.DEPTH_TEST);
+
+        for (const layer of this.glowDynamicLayers) {
+            if (!layer.visible) continue;
+            const m = layer.transform ? total.multiply(layer.transform) : total;
+            layer.geometry.render_glow(
+                this.glowLineShader,
+                this.glowPolyShader,
+                m,
+                time,
+            );
+        }
+
+        gl.enable(gl.DEPTH_TEST);
+    }
+}

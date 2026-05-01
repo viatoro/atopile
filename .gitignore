@@ -183,7 +183,10 @@ dist/
 node_modules/
 
 # VS Code extension webview build outputs (CI builds these)
-src/vscode-atopile/resources/webviews/**
+apps/open-atopile/src/vscode-atopile/resources/webviews/**
+
+# CI-generated dependency constraints (exported from uv.lock)
+constraints.txt
 
 _local
 .local
@@ -210,11 +213,7 @@ examples/**/.cursor/
 examples/**/.github/
 examples/**/.windsurf/
 examples/**/.west/
-examples/**/parts/
-# Keep example parts needed for testing
-!examples/i2c/parts/
-!examples/i2c/parts/Texas_Instruments_TCA9548APWR/
-!examples/i2c/parts/Texas_Instruments_TCA9548APWR/**
+#examples/**/parts/
 
 # KiCad temporary files
 **/~*.kicad_pcb.lck
@@ -225,9 +224,26 @@ examples/**/parts/
 
 
 # layout server frontend build artifacts
+src/atopile/layout_server/static/editor.css
+src/atopile/layout_server/static/editor.css.map
 src/atopile/layout_server/static/editor.js
 src/atopile/layout_server/static/editor.js.map
 
 # vscode layout editor webview bundle artifacts
+src/vscode-atopile/resources/layout-editor/editor.css
+src/vscode-atopile/resources/layout-editor/editor.css.map
 src/vscode-atopile/resources/layout-editor/editor.js
 src/vscode-atopile/resources/layout-editor/editor.js.map
+
+# claude
+**/.claude/settings.local.json
+/mono.toml
+/PKG-INFO
+/prek.toml
+/.idea/libraries/default_gerber.xml
+/.idea/libraries/default_gerber2.xml
+/.idea/.gitignore
+/.idea/atopile.iml
+/.idea/misc.xml
+/.idea/modules.xml
+/.idea/vcs.xml

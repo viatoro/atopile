@@ -12,6 +12,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, cast
 
+APP_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _run(args: list[str], **kwargs):
+    kwargs.setdefault("cwd", APP_ROOT)
+    return subprocess.run(args, **kwargs)
+
 
 @dataclass
 class CommitInfo:
@@ -138,7 +145,7 @@ def get_commit_info() -> CommitInfo:
             info = event_commit
 
         # Check if we're in a git repository
-        result = subprocess.run(
+        result = _run(
             ["git", "rev-parse", "--git-dir"], capture_output=True, text=True, timeout=5
         )
         if result.returncode != 0:
@@ -153,7 +160,7 @@ def get_commit_info() -> CommitInfo:
         #   - Finally fall back to HEAD
         sha: Optional[str] = info.hash
         if sha:
-            verify = subprocess.run(
+            verify = _run(
                 ["git", "rev-parse", "--verify", f"{sha}^{{commit}}"],
                 capture_output=True,
                 text=True,
@@ -175,7 +182,7 @@ def get_commit_info() -> CommitInfo:
             sha = "HEAD"
 
         # Normalize/resolve to full hash.
-        result = subprocess.run(
+        result = _run(
             ["git", "rev-parse", sha], capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0:
@@ -183,7 +190,7 @@ def get_commit_info() -> CommitInfo:
             info.short_hash = info.hash[:8] if info.hash else None
 
         # Get author
-        result = subprocess.run(
+        result = _run(
             ["git", "log", "-1", "--format=%an <%ae>", sha],
             capture_output=True,
             text=True,
@@ -193,7 +200,7 @@ def get_commit_info() -> CommitInfo:
             info.author = result.stdout.strip()
 
         # Get commit message (first line only)
-        result = subprocess.run(
+        result = _run(
             ["git", "log", "-1", "--format=%s", sha],
             capture_output=True,
             text=True,
@@ -203,7 +210,7 @@ def get_commit_info() -> CommitInfo:
             info.message = result.stdout.strip()
 
         # Get commit time
-        result = subprocess.run(
+        result = _run(
             ["git", "log", "-1", "--format=%ci", sha],
             capture_output=True,
             text=True,
@@ -212,7 +219,7 @@ def get_commit_info() -> CommitInfo:
         if result.returncode == 0:
             info.time = result.stdout.strip()
 
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+    except subprocess.TimeoutExpired, FileNotFoundError, OSError:
         # git not installed, timeout, or other OS error
         pass
     except Exception:
@@ -257,7 +264,7 @@ def get_git_info() -> dict[str, Any] | None:
     info: dict[str, Any] = {"branch": branch}
     info["remote_tracking"] = get_remote_tracking_branch()
     try:
-        result = subprocess.run(
+        result = _run(
             ["git", "status", "--porcelain"],
             capture_output=True,
             text=True,

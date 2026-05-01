@@ -1,0 +1,129 @@
+/**
+ * PanelSearchBox - Standardized search input for all panels
+ * Consistent styling across Structure, Packages, Standard Library, Variables, BOM
+ */
+
+.panel-search-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Consistent padding from panel edges */
+  margin: 4px 8px 6px;
+  padding: 3px 8px;
+  /* Light shaded background matching VS Code input */
+  background: var(--vscode-input-background, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 4px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.panel-search-box.no-margin {
+  margin: 0;
+}
+
+.panel-search-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 8px;
+}
+
+.panel-search-toolbar .panel-search-box {
+  flex: 1;
+  min-width: 0;
+}
+
+.panel-search-filter {
+  position: relative;
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 0 0 18px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition:
+    color var(--transition-fast),
+    opacity var(--transition-fast);
+}
+
+.panel-search-filter::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  transform: translateY(-50%);
+  background: color-mix(in srgb, var(--text-muted) 72%, transparent);
+  transition: background var(--transition-fast), transform var(--transition-fast);
+}
+
+.panel-search-filter:hover {
+  color: var(--text-primary);
+  opacity: 1;
+}
+
+.panel-search-filter.active {
+  color: var(--text-primary);
+}
+
+.panel-search-filter.active::before {
+  background: var(--ato-orange);
+  transform: translateY(-50%) scale(1.05);
+}
+
+.panel-search-box:hover {
+  border-color: var(--vscode-input-border, rgba(255, 255, 255, 0.1));
+}
+
+.panel-search-box:focus-within {
+  border-color: var(--vscode-focusBorder, var(--ato-orange));
+  background: var(--vscode-input-background, rgba(255, 255, 255, 0.08));
+}
+
+.panel-search-icon {
+  flex-shrink: 0;
+  color: var(--vscode-input-placeholderForeground, var(--text-muted));
+}
+
+.panel-search-box input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  /* Match VS Code native font */
+  font-size: var(--font-size-xs);
+  color: var(--vscode-input-foreground, var(--text-primary));
+}
+
+.panel-search-box input::placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--text-muted));
+}
+
+.panel-search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--vscode-input-placeholderForeground, var(--text-muted));
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.panel-search-clear:hover {
+  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.1));
+  color: var(--vscode-foreground, var(--text-primary));
+}

@@ -41,7 +41,7 @@ def test_performance_parameters(A: int, B: int, rs: int, pick: bool):
     with timings.measure("import F"):
         import faebryk.library._F as F
 
-    from faebryk.core.solver.solver import Solver
+    from faebryk.core.solver import Solver
     from faebryk.libs.picker.picker import get_pick_tree, pick_topologically
 
     def _build_recursive(depth: int) -> fabll._ChildField[F.Expressions.Add]:
@@ -168,7 +168,7 @@ def test_performance_parameters(A: int, B: int, rs: int, pick: bool):
                 .setup_from_center_rel(
                     1,
                     0.1,
-                    F.Units.Ohm.bind_typegraph(tg).create_instance(g=g).is_unit.get(),
+                    F.Units.Ohm.bind_typegraph(tg).as_type_node().is_unit.get(),
                 )
                 .can_be_operand.get(),
                 assert_=True,

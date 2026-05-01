@@ -3,6 +3,7 @@
 Tests for the LSP auto-completion functionality
 """
 
+import logging
 import sys
 import tempfile
 from contextlib import contextmanager
@@ -34,12 +35,15 @@ from atopile.lsp.lsp_server import (
     _get_type_source_location,
     _get_type_usage_example,
     _is_already_imported,
+    _resolve_dot_completion_type_node,
     build_document,
     extract_field_reference_before_dot,
     format_ato_source,
+    get_type_node_completions,
     on_code_action,
     on_document_completion,
     on_document_definition,
+    on_document_diagnostic,
     on_document_formatting,
     on_document_hover,
     on_find_references,
@@ -158,13 +162,55 @@ def _to_mock(code: str, marker="#|#"):
         del DOCUMENT_STATES[test_uri]
 
 
+@contextmanager
+def _to_mock_file(path: Path, code: str, marker="#|#"):
+    dedented = dedent(code)
+
+    marker_row = None
+    marker_column = None
+    for row, line in enumerate(dedented.split("\n")):
+        if marker in line:
+            marker_row = row
+            marker_column = line.index(marker)
+            break
+    dedented = dedented.replace(marker, "", count=1)
+
+    if marker_row is None or marker_column is None:
+        raise ValueError(f"Marker {marker} not found in code")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(dedented)
+    test_uri = path.resolve().as_uri()
+
+    mock_document = Mock()
+    mock_document.source = dedented
+    mock_document.path = str(path.resolve())
+
+    mock_params = Mock()
+    mock_params.text_document.uri = test_uri
+    mock_params.position.line = marker_row
+    mock_params.position.character = marker_column
+
+    if test_uri in DOCUMENT_STATES:
+        del DOCUMENT_STATES[test_uri]
+
+    build_document(test_uri, dedented)
+
+    with patch("atopile.lsp.lsp_server.LSP_SERVER") as mock_server:
+        mock_server.workspace.get_text_document.return_value = mock_document
+        yield mock_params, mock_document
+
+    if test_uri in DOCUMENT_STATES:
+        state = DOCUMENT_STATES[test_uri]
+        state.reset_graph()
+        del DOCUMENT_STATES[test_uri]
+
+
 class TestEndToEndCompletion:
     """End-to-end tests with real ato code scenarios"""
 
     def test_new_keyword_completion_end_to_end(self):
-        """Test completion after 'new' keyword with partial type name"""
-        # Mock ato content with imports and local definitions
-        # Use valid syntax with a placeholder type that will be replaced
+        """Test completion after 'new' only shows imported or local symbols."""
         ato_content = """
             import Resistor
             import Capacitor
@@ -186,12 +232,455 @@ class TestEndToEndCompletion:
             assert len(types.items) > 0
 
             labels = {item.label for item in types.items}
+            must_contain = {
+                "Resistor",
+                "Capacitor",
+                "LED",
+                "TestModule",
+                "TestInterface",
+            }
+            assert labels.intersection(must_contain) == must_contain
+            assert "ElectricPower" not in labels
 
-            # Should find local definitions (note: the test document needs to
-            # build successfully to get local types, which requires valid syntax)
-            # For incomplete code, at minimum stdlib types should be present
-            stdlib_types = {"Resistor", "Capacitor", "LED"}
-            assert len(labels.intersection(stdlib_types)) > 0
+    def test_dot_completion_includes_inherited_members(self):
+        """Dot completion should include members inherited from local supertypes."""
+        ato_content = """
+            import ElectricPower
+
+            module App:
+                derived = new Derived
+                derived.#|#
+
+            module Base:
+                power = new ElectricPower
+
+            module Derived from Base:
+                bla = new ElectricPower
+        """
+
+        with _to_mock(ato_content) as (mock_params, _):
+            result = on_document_completion(mock_params)
+
+            assert isinstance(result, lsp.CompletionList)
+            labels = {item.label for item in result.items}
+
+            assert "bla" in labels
+            assert "power" in labels
+
+    def test_typegraph_completion_includes_inherited_members_after_lsp_build(self):
+        """The LSP build graph should expose inherited children on resolved types."""
+        ato_content = """
+            import ElectricPower
+
+            module App:
+                derived = new Derived
+
+            module Base:
+                power = new ElectricPower
+
+            module Derived from Base:
+                bla = new ElectricPower
+        """
+        test_uri = "file:///test_inherited_typegraph_completion.ato"
+
+        if test_uri in DOCUMENT_STATES:
+            del DOCUMENT_STATES[test_uri]
+
+        state = build_document(test_uri, dedent(ato_content))
+        _, tg, _ = state.ensure_graph()
+        type_node = _resolve_dot_completion_type_node(state, "derived")
+
+        assert type_node is not None
+        labels = {item.label for item in get_type_node_completions(tg, type_node)}
+        assert "bla" in labels
+        assert "power" in labels
+
+        if test_uri in DOCUMENT_STATES:
+            DOCUMENT_STATES[test_uri].reset_graph()
+            del DOCUMENT_STATES[test_uri]
+
+    def test_inherited_typegraph_completion_survives_unrelated_missing_type(self):
+        """Unrelated unresolved symbols should not block inheritance merge in LSP."""
+        ato_content = """
+            import ElectricPower
+
+            module App:
+                x = new SPI
+                derived = new Derived
+
+            module Base:
+                power = new ElectricPower
+
+            module Derived from Base:
+                bla = new ElectricPower
+        """
+        test_uri = "file:///test_inherited_typegraph_with_missing_type.ato"
+
+        if test_uri in DOCUMENT_STATES:
+            del DOCUMENT_STATES[test_uri]
+
+        state = build_document(test_uri, dedent(ato_content))
+        _, tg, _ = state.ensure_graph()
+        type_node = _resolve_dot_completion_type_node(state, "derived")
+
+        assert type_node is not None
+        labels = {item.label for item in get_type_node_completions(tg, type_node)}
+        assert "bla" in labels
+        assert "power" in labels
+        assert any("SPI" in diag.message for diag in state.diagnostics)
+
+        if test_uri in DOCUMENT_STATES:
+            DOCUMENT_STATES[test_uri].reset_graph()
+            del DOCUMENT_STATES[test_uri]
+
+    def test_deprecations_become_diagnostics_without_error_logger_spam(self, caplog):
+        """Deprecated features should surface as diagnostics, not raw LSP log spam."""
+        ato_content = """import has_single_electric_reference_shared
+            import has_datasheet_defined
+
+            module App:
+                trait has_single_electric_reference_shared
+                trait has_datasheet_defined<datasheet="https://example.com/ds.pdf">
+            """
+        test_uri = "file:///test_deprecation_diagnostics.ato"
+
+        if test_uri in DOCUMENT_STATES:
+            del DOCUMENT_STATES[test_uri]
+
+        source = dedent(ato_content)
+        lines = source.splitlines()
+        expected_single_col = lines[0].index("has_single_electric_reference_shared")
+        expected_datasheet_col = lines[1].index("has_datasheet_defined")
+
+        with caplog.at_level(logging.WARNING, logger="atopile.errors"):
+            state = build_document(test_uri, source)
+
+        warning_messages = [
+            (
+                diagnostic.message,
+                diagnostic.range.start.line,
+                diagnostic.range.start.character,
+            )
+            for diagnostic in state.diagnostics
+            if diagnostic.severity == lsp.DiagnosticSeverity.Warning
+        ]
+
+        assert (
+            "'has_single_electric_reference_shared' is deprecated. Use "
+            "'has_single_electric_reference' instead.",
+            0,
+            expected_single_col,
+        ) in warning_messages
+        assert (
+            "'has_datasheet_defined' is deprecated. Use 'has_datasheet' instead.",
+            1,
+            expected_datasheet_col,
+        ) in warning_messages
+        assert not any(
+            "has_single_electric_reference_shared" in record.message
+            or "has_datasheet_defined" in record.message
+            for record in caplog.records
+            if record.name == "atopile.errors"
+        )
+
+        if test_uri in DOCUMENT_STATES:
+            state = DOCUMENT_STATES[test_uri]
+            state.reset_graph()
+            del DOCUMENT_STATES[test_uri]
+
+    def test_unused_missing_path_import_becomes_diagnostic(self):
+        test_uri = "file:///test_unused_missing_import.ato"
+        source = dedent(
+            """
+            from "bla" import X
+
+            module App:
+                pass
+            """
+        )
+
+        if test_uri in DOCUMENT_STATES:
+            del DOCUMENT_STATES[test_uri]
+
+        state = build_document(test_uri, source)
+        import_path_col = source.splitlines()[1].index('"bla"')
+
+        error_messages = [
+            (
+                diagnostic.message,
+                diagnostic.range.start.line,
+                diagnostic.range.start.character,
+            )
+            for diagnostic in state.diagnostics
+            if diagnostic.severity == lsp.DiagnosticSeverity.Error
+        ]
+
+        assert ("Unable to resolve import `bla`", 1, import_path_col) in error_messages
+
+        if test_uri in DOCUMENT_STATES:
+            state = DOCUMENT_STATES[test_uri]
+            state.reset_graph()
+            del DOCUMENT_STATES[test_uri]
+
+    def test_malformed_empty_assignment_does_not_raise_internal_build_error(self):
+        test_uri = "file:///test_malformed_empty_assignment.ato"
+        source = dedent(
+            """
+            module App:
+                x =
+            """
+        )
+
+        if test_uri in DOCUMENT_STATES:
+            del DOCUMENT_STATES[test_uri]
+
+        state = build_document(test_uri, source)
+
+        assert state.last_error is None
+        assert not any(
+            "Build error:" in diagnostic.message for diagnostic in state.diagnostics
+        )
+        assert any(
+            diagnostic.severity == lsp.DiagnosticSeverity.Error
+            for diagnostic in state.diagnostics
+        )
+
+        if test_uri in DOCUMENT_STATES:
+            state = DOCUMENT_STATES[test_uri]
+            state.reset_graph()
+            del DOCUMENT_STATES[test_uri]
+
+    def test_new_keyword_completion_includes_explicit_path_imports_only(self):
+        """Test `new` completion includes explicitly imported path symbols only."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            dep_path = root / "dep.ato"
+            dep_path.write_text(
+                dedent(
+                    """
+                    module ImportedThing:
+                        pass
+
+                    module HiddenThing:
+                        pass
+                    """
+                )
+            )
+
+            app_path = root / "app.ato"
+            ato = """
+                from "dep.ato" import ImportedThing
+
+                module App:
+                    x = new #|#
+                """
+            with _to_mock_file(app_path, ato) as (mock_params, _):
+                result = on_document_completion(mock_params)
+
+                assert isinstance(result, lsp.CompletionList)
+                labels = {item.label for item in result.items}
+
+                assert "ImportedThing" in labels
+                assert "App" in labels
+                assert "HiddenThing" not in labels
+                assert "Resistor" not in labels
+
+    def test_new_keyword_completion_filters_partial_symbol_prefix(self):
+        """Completion after `new Foo` should keep working while typing the symbol."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            dep_path = root / "dep.ato"
+            dep_path.write_text(
+                dedent(
+                    """
+                    module TexasThing:
+                        pass
+                    """
+                )
+            )
+
+            app_path = root / "app.ato"
+            ato = """
+                from "dep.ato" import TexasThing
+                import Capacitor
+
+                module App:
+                    x = new Te#|#
+                """
+            with _to_mock_file(app_path, ato) as (mock_params, _):
+                result = on_document_completion(mock_params)
+
+                assert isinstance(result, lsp.CompletionList)
+                labels = {item.label for item in result.items}
+
+                assert "TexasThing" in labels
+                assert "Capacitor" not in labels
+                assert "App" not in labels
+
+    def test_unavailable_new_type_diagnostic_points_at_type_name(self):
+        """Test unresolved `new Type` diagnostics point at the type token."""
+        ato = """
+            module App:
+                x = new #|#MissingType
+            """
+        with _to_mock(ato) as (mock_params, _):
+            state = DOCUMENT_STATES[mock_params.text_document.uri]
+            diagnostics = [
+                diag
+                for diag in state.diagnostics
+                if "not defined in this scope" in diag.message
+            ]
+
+            assert diagnostics
+
+            diag = diagnostics[0]
+            assert diag.range.start.line == mock_params.position.line
+            assert diag.range.start.character == mock_params.position.character
+            assert diag.range.end.character == (
+                mock_params.position.character + len("MissingType")
+            )
+
+    def test_unavailable_new_type_diagnostic_points_at_exact_type_name(self):
+        """Regression test for unresolved stdlib suggestions like `Addressor`."""
+        ato = """
+            module App:
+                a = new #|#Addressor
+            """
+        with _to_mock(ato) as (mock_params, _):
+            state = DOCUMENT_STATES[mock_params.text_document.uri]
+            diagnostics = [
+                diag
+                for diag in state.diagnostics
+                if "Addressor" in diag.message
+                and "not defined in this scope" in diag.message
+            ]
+
+            assert diagnostics
+
+            diag = diagnostics[0]
+            assert "Add `import Addressor`" in diag.message
+            assert diag.range.start.line == mock_params.position.line
+            assert diag.range.start.character == mock_params.position.character
+            assert diag.range.end.character == (
+                mock_params.position.character + len("Addressor")
+            )
+
+    def test_module_templating_new_type_diagnostic_points_at_exact_type_name(self):
+        """Template-required errors for `new Type` should underline the type token."""
+        ato = """
+            import Addressor
+
+            module App:
+                g = new #|#Addressor
+            """
+        with _to_mock(ato) as (mock_params, _):
+            state = DOCUMENT_STATES[mock_params.text_document.uri]
+            diagnostics = [
+                diag
+                for diag in state.diagnostics
+                if "requires module templating" in diag.message
+                and "Addressor" in diag.message
+            ]
+
+            assert diagnostics
+
+            diag = diagnostics[0]
+            assert diag.range.start.line == mock_params.position.line
+            assert diag.range.start.character == mock_params.position.character
+            assert diag.range.end.character == (
+                mock_params.position.character + len("Addressor")
+            )
+
+    def test_multiple_unavailable_new_types_produce_multiple_diagnostics(self):
+        """Test multiple unresolved `new Type` expressions all get diagnostics."""
+        ato = """
+            module App:
+                x = new MissingOne
+                y = new MissingTwo
+            """
+        test_uri = "file:///test_multi_missing_types.ato"
+        if test_uri in DOCUMENT_STATES:
+            del DOCUMENT_STATES[test_uri]
+        try:
+            state = build_document(test_uri, dedent(ato))
+            diagnostics = [
+                diag
+                for diag in state.diagnostics
+                if "not defined in this scope" in diag.message
+            ]
+
+            assert len(diagnostics) == 2
+            messages = {diag.message for diag in diagnostics}
+            assert any("MissingOne" in message for message in messages)
+            assert any("MissingTwo" in message for message in messages)
+        finally:
+            if test_uri in DOCUMENT_STATES:
+                state = DOCUMENT_STATES[test_uri]
+                state.reset_graph()
+                del DOCUMENT_STATES[test_uri]
+
+    def test_redefining_singleton_new_child_reports_duplicate_definition(self):
+        """A second `name = new Type` should fail as a redefinition."""
+        ato = """
+            module App:
+                b = new P
+                b = new Q
+
+            module P:
+                pass
+
+            module Q:
+                pass
+        """
+        test_uri = "file:///test_redefining_singleton_new_child.ato"
+        if test_uri in DOCUMENT_STATES:
+            del DOCUMENT_STATES[test_uri]
+        try:
+            state = build_document(test_uri, dedent(ato))
+            diagnostics = [
+                diag
+                for diag in state.diagnostics
+                if "Redefining `b` is not allowed" in diag.message
+            ]
+
+            assert diagnostics
+            assert all(
+                "Unresolved type references remaining after linking" not in diag.message
+                for diag in diagnostics
+            )
+        finally:
+            if test_uri in DOCUMENT_STATES:
+                state = DOCUMENT_STATES[test_uri]
+                state.reset_graph()
+                del DOCUMENT_STATES[test_uri]
+
+    def test_document_diagnostic_returns_pull_report(self):
+        """Pull diagnostics should return a proper LSP diagnostic report."""
+        ato = """
+            module App:
+                x = new MissingType
+            """
+        test_uri = "file:///test_pull_diagnostic_report.ato"
+        if test_uri in DOCUMENT_STATES:
+            del DOCUMENT_STATES[test_uri]
+        try:
+            build_document(test_uri, dedent(ato))
+            params = lsp.DocumentDiagnosticParams(
+                text_document=lsp.TextDocumentIdentifier(uri=test_uri)
+            )
+            report = on_document_diagnostic(params)
+
+            assert isinstance(report, lsp.RelatedFullDocumentDiagnosticReport)
+            assert any(
+                "MissingType" in diag.message
+                and "not defined in this scope" in diag.message
+                for diag in report.items
+            )
+        finally:
+            if test_uri in DOCUMENT_STATES:
+                state = DOCUMENT_STATES[test_uri]
+                state.reset_graph()
+                del DOCUMENT_STATES[test_uri]
 
     def test_import_completion_end_to_end(self):
         """Test completion for 'import' keyword"""
@@ -207,6 +696,127 @@ class TestEndToEndCompletion:
             labels = {item.label for item in result.items}
             must_contain = {"Resistor", "Capacitor", "LED", "ElectricPower"}
             assert labels.intersection(must_contain) == must_contain
+
+    def test_from_import_path_completion_uses_target_file_symbols(self):
+        """Test completion for `from "path" import ...` uses the target file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            dep_path = root / "dep.ato"
+            dep_path.write_text(
+                dedent(
+                    """
+                    module LocalThing:
+                        pass
+
+                    interface LocalIface:
+                        pass
+                    """
+                )
+            )
+
+            app_path = root / "app.ato"
+            ato = """
+                from "dep.ato" import #|#
+                """
+            with _to_mock_file(app_path, ato) as (mock_params, _):
+                result = on_document_completion(mock_params)
+
+                assert isinstance(result, lsp.CompletionList)
+                labels = {item.label for item in result.items}
+
+                assert "LocalThing" in labels
+                assert "LocalIface" in labels
+                assert "Resistor" not in labels
+
+    def test_array_indexed_member_completion_end_to_end(self):
+        """Test completion after array indexing like `resistors[0].`."""
+        ato = """
+            import Resistor
+
+            module App:
+                resistors = new Resistor[2]
+                resistors[0].#|#
+            """
+        with _to_mock(ato) as (mock_params, _):
+            result = on_document_completion(mock_params)
+
+            assert isinstance(result, lsp.CompletionList)
+            assert len(result.items) > 0
+
+            labels = {item.label for item in result.items}
+            assert "unnamed[0]" in labels
+            assert "unnamed[1]" in labels
+            assert "resistance" in labels
+
+    def test_dot_completion_for_imported_assigned_package(self):
+        """Dot completion should work for assigned imported package types."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            dep_path = root / "dep.ato"
+            dep_path.write_text(
+                dedent(
+                    """
+                    interface Pin:
+                        pass
+
+                    module ImportedPackage:
+                        IN = new Pin
+                        OUT = new Pin
+                    """
+                )
+            )
+
+            app_path = root / "app.ato"
+            ato = """
+                from "dep.ato" import ImportedPackage
+
+                module App:
+                    package = new ImportedPackage
+                    package.#|#
+                """
+            with _to_mock_file(app_path, ato) as (mock_params, _):
+                result = on_document_completion(mock_params)
+
+                assert isinstance(result, lsp.CompletionList)
+                labels = {item.label for item in result.items}
+
+                assert "IN" in labels
+                assert "OUT" in labels
+
+    def test_partial_dot_completion_for_imported_assigned_package(self):
+        """Dot completion should keep working while typing the member prefix."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            dep_path = root / "dep.ato"
+            dep_path.write_text(
+                dedent(
+                    """
+                    interface Pin:
+                        pass
+
+                    module ImportedPackage:
+                        IN = new Pin
+                        OUT = new Pin
+                    """
+                )
+            )
+
+            app_path = root / "app.ato"
+            ato = """
+                from "dep.ato" import ImportedPackage
+
+                module App:
+                    package = new ImportedPackage
+                    package.I#|#
+                """
+            with _to_mock_file(app_path, ato) as (mock_params, _):
+                result = on_document_completion(mock_params)
+
+                assert isinstance(result, lsp.CompletionList)
+                labels = {item.label for item in result.items}
+
+                assert "IN" in labels
+                assert "OUT" not in labels
 
     def test_multi_import_comma_separated_completion(self):
         """Test completion for comma-separated multi imports.
@@ -431,6 +1041,82 @@ module App:
 
         # Cleanup
 
+    def test_go_to_definition_on_unused_path_import(self):
+        """Go-to-definition on a path-imported symbol should work even if unused."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            dep_path = root / "dep.ato"
+            dep_path.write_text("module ImportedThing:\n    pass\n")
+
+            app_path = root / "app.ato"
+            app_source = """
+                from "dep.ato" import Impor#|#tedThing
+
+                module App:
+                    pass
+                """
+
+            with _to_mock_file(app_path, app_source) as (mock_params, _):
+                result = on_document_definition(mock_params)
+
+            assert result is not None
+            assert isinstance(result, lsp.Location)
+            assert result.uri == dep_path.resolve().as_uri()
+            assert result.range.start.line == 0
+
+    def test_go_to_definition_on_inherited_member_end_to_end(self):
+        """End-to-end go-to-definition should resolve inherited members."""
+        ato_content = """
+import ElectricPower
+
+module App:
+    derived = new Derived
+    derived.po#|#wer.hv ~ derived.power.lv
+
+module Base:
+    power = new ElectricPower
+
+module Derived from Base:
+    bla = new ElectricPower
+"""
+        with _to_mock(ato_content) as (mock_params, mock_document):
+            with patch("atopile.lsp.lsp_server.LSP_SERVER") as mock_server:
+                mock_server.workspace.get_text_document.return_value = mock_document
+                result = on_document_definition(mock_params)
+
+            assert result is not None
+            assert isinstance(result, lsp.Location)
+            assert result.uri == mock_params.text_document.uri
+            assert result.range.start.line == 8
+            assert result.range.start.character == 4
+
+    def test_go_to_definition_on_inherited_member_survives_unrelated_missing_type(self):
+        """Inherited go-to-definition should still work with unrelated missing types."""
+        ato_content = """
+import ElectricPower
+
+module App:
+    x = new SPI
+    derived = new Derived
+    derived.po#|#wer.hv ~ derived.power.lv
+
+module Base:
+    power = new ElectricPower
+
+module Derived from Base:
+    bla = new ElectricPower
+"""
+        with _to_mock(ato_content) as (mock_params, mock_document):
+            with patch("atopile.lsp.lsp_server.LSP_SERVER") as mock_server:
+                mock_server.workspace.get_text_document.return_value = mock_document
+                result = on_document_definition(mock_params)
+
+            assert result is not None
+            assert isinstance(result, lsp.Location)
+            assert result.uri == mock_params.text_document.uri
+            assert result.range.start.line == 9
+            assert result.range.start.character == 4
+
     def test_find_type_in_ato_file_module(self):
         """Test finding a module definition in an ato file"""
         ato_content = """import Something
@@ -632,6 +1318,81 @@ module App:
         )
 
         # Cleanup
+        if test_uri in DOCUMENT_STATES:
+            DOCUMENT_STATES[test_uri].reset_graph()
+            del DOCUMENT_STATES[test_uri]
+
+    def test_find_child_member_definition_deeply_nested(self):
+        """Nested member resolution should work beyond one intermediate hop."""
+        ato_content = """\
+import ElectricPower
+
+module D:
+    power = new ElectricPower
+
+module C:
+    d = new D
+
+module B:
+    c = new C
+
+module App:
+    g = new B
+    g.c.d.power.hv ~ g.c.d.power.lv
+"""
+        test_uri = "file:///test_deep_nested_child_def.ato"
+
+        if test_uri in DOCUMENT_STATES:
+            del DOCUMENT_STATES[test_uri]
+
+        state = build_document(test_uri, ato_content)
+
+        result = _find_child_member_definition("g.c.d", "d", state, test_uri)
+
+        assert result is not None
+        assert isinstance(result, lsp.Location)
+        assert result.range.start.line == 6, (
+            f"Expected line 6, got {result.range.start.line}"
+        )
+        assert result.range.start.character == 4
+
+        if test_uri in DOCUMENT_STATES:
+            DOCUMENT_STATES[test_uri].reset_graph()
+            del DOCUMENT_STATES[test_uri]
+
+    def test_find_child_member_definition_on_inherited_field(self):
+        """Inherited members should resolve to the parent definition."""
+        ato_content = """\
+import ElectricPower
+
+module App:
+    derived = new Derived
+    derived.power.hv ~ derived.power.lv
+
+module Base:
+    power = new ElectricPower
+
+module Derived from Base:
+    bla = new ElectricPower
+"""
+        test_uri = "file:///test_inherited_child_def.ato"
+
+        if test_uri in DOCUMENT_STATES:
+            del DOCUMENT_STATES[test_uri]
+
+        state = build_document(test_uri, ato_content)
+
+        result = _find_child_member_definition(
+            "derived.power", "power", state, test_uri
+        )
+
+        assert result is not None
+        assert isinstance(result, lsp.Location)
+        assert result.range.start.line == 7, (
+            f"Expected line 7, got {result.range.start.line}"
+        )
+        assert result.range.start.character == 4
+
         if test_uri in DOCUMENT_STATES:
             DOCUMENT_STATES[test_uri].reset_graph()
             del DOCUMENT_STATES[test_uri]
@@ -1488,6 +2249,191 @@ class TestFieldReferenceValidation:
         if test_uri in DOCUMENT_STATES:
             DOCUMENT_STATES[test_uri].reset_graph()
             del DOCUMENT_STATES[test_uri]
+
+
+class TestStdlibAtoFileImports:
+    """Tests for LSP features with stdlib .ato file imports (e.g. regulators.ato)."""
+
+    def test_stdlib_ato_file_import_builds_without_diagnostics(self):
+        """Importing from a stdlib .ato file should build cleanly in the LSP."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app_path = Path(tmpdir) / "app.ato"
+            source = dedent("""
+                from "regulators.ato" import FixedLDO
+
+                module App from FixedLDO:
+                    pass
+            """)
+            app_path.write_text(dedent(source))
+            test_uri = app_path.resolve().as_uri()
+
+            if test_uri in DOCUMENT_STATES:
+                del DOCUMENT_STATES[test_uri]
+
+            state = build_document(test_uri, source)
+
+            error_diagnostics = [
+                d
+                for d in state.diagnostics
+                if d.severity == lsp.DiagnosticSeverity.Error
+            ]
+            assert error_diagnostics == [], (
+                f"Unexpected errors: {[d.message for d in error_diagnostics]}"
+            )
+            assert "hover" in state.query_capabilities
+
+            if test_uri in DOCUMENT_STATES:
+                DOCUMENT_STATES[test_uri].reset_graph()
+                del DOCUMENT_STATES[test_uri]
+
+    def test_stdlib_ato_file_import_hover_on_local_type(self):
+        """Hover on a local type that inherits from a stdlib .ato type should work."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app_path = Path(tmpdir) / "app.ato"
+            ato_content = dedent("""
+                from "regulators.ato" import Buck
+
+                module App from Buck:
+                    pass
+            """)
+            app_path.write_text(dedent(ato_content))
+            test_uri = app_path.resolve().as_uri()
+
+            if test_uri in DOCUMENT_STATES:
+                del DOCUMENT_STATES[test_uri]
+
+            build_document(test_uri, ato_content)
+
+            mock_params = Mock()
+            mock_params.text_document.uri = test_uri
+            mock_params.position.line = 3  # module App from Buck:
+            mock_params.position.character = 8  # on "App"
+
+            with patch("atopile.lsp.lsp_server.LSP_SERVER") as mock_server:
+                mock_document = Mock()
+                mock_document.source = ato_content
+                mock_server.workspace.get_text_document.return_value = mock_document
+                result = on_document_hover(mock_params)
+
+            assert result is not None
+            assert isinstance(result, lsp.Hover)
+            assert "App" in result.contents.value
+
+            if test_uri in DOCUMENT_STATES:
+                DOCUMENT_STATES[test_uri].reset_graph()
+                del DOCUMENT_STATES[test_uri]
+
+    def test_stdlib_ato_file_import_linking_resolves_dependencies(self):
+        """Linking a file with stdlib .ato imports should resolve dependencies."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app_path = Path(tmpdir) / "app.ato"
+            source = dedent("""
+                from "regulators.ato" import FixedLDO
+
+                module App from FixedLDO:
+                    pass
+            """)
+            app_path.write_text(source)
+            test_uri = app_path.resolve().as_uri()
+
+            if test_uri in DOCUMENT_STATES:
+                del DOCUMENT_STATES[test_uri]
+
+            state = build_document(test_uri, source)
+
+            # Linking should have resolved the regulators.ato dependency
+            assert len(state.resolved_dependency_paths) > 0
+            dep_paths_str = [str(p) for p in state.resolved_dependency_paths]
+            assert any("regulators" in p for p in dep_paths_str), (
+                f"Expected regulators.ato in deps, got: {dep_paths_str}"
+            )
+
+            if test_uri in DOCUMENT_STATES:
+                DOCUMENT_STATES[test_uri].reset_graph()
+                del DOCUMENT_STATES[test_uri]
+
+    def test_stdlib_ato_file_import_multiple_types(self):
+        """Multiple types from the same stdlib .ato file should all resolve."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app_path = Path(tmpdir) / "app.ato"
+            source = dedent("""
+                from "regulators.ato" import Buck
+                from "regulators.ato" import FixedLDO
+
+                module App:
+                    buck = new Buck
+                    ldo = new FixedLDO
+            """)
+            app_path.write_text(source)
+            test_uri = app_path.resolve().as_uri()
+
+            if test_uri in DOCUMENT_STATES:
+                del DOCUMENT_STATES[test_uri]
+
+            state = build_document(test_uri, source)
+
+            error_diagnostics = [
+                d
+                for d in state.diagnostics
+                if d.severity == lsp.DiagnosticSeverity.Error
+            ]
+            assert error_diagnostics == [], (
+                f"Unexpected errors: {[d.message for d in error_diagnostics]}"
+            )
+
+            if test_uri in DOCUMENT_STATES:
+                DOCUMENT_STATES[test_uri].reset_graph()
+                del DOCUMENT_STATES[test_uri]
+
+    def test_stdlib_ato_file_import_go_to_definition(self):
+        """Go-to-definition on a stdlib .ato imported symbol should resolve."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app_path = Path(tmpdir) / "app.ato"
+            ato = """
+                from "regulators.ato" import Adjustable#|#LDO
+
+                module App:
+                    pass
+            """
+            with _to_mock_file(app_path, ato) as (mock_params, mock_document):
+                with patch("atopile.lsp.lsp_server.LSP_SERVER") as mock_server:
+                    mock_server.workspace.get_text_document.return_value = mock_document
+                    result = on_document_definition(mock_params)
+
+            assert result is not None, "Expected definition for AdjustableLDO"
+            assert isinstance(result, lsp.Location)
+            assert "regulators" in result.uri
+
+    def test_nonexistent_stdlib_ato_file_import_produces_diagnostic(self):
+        """
+        Importing from a non-existent .ato file should produce an error diagnostic.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app_path = Path(tmpdir) / "app.ato"
+            source = dedent("""
+                from "nonexistent_stdlib.ato" import Foo
+
+                module App:
+                    pass
+            """)
+            app_path.write_text(dedent(source))
+            test_uri = app_path.resolve().as_uri()
+
+            if test_uri in DOCUMENT_STATES:
+                del DOCUMENT_STATES[test_uri]
+
+            state = build_document(test_uri, source)
+
+            error_diagnostics = [
+                d
+                for d in state.diagnostics
+                if d.severity == lsp.DiagnosticSeverity.Error
+            ]
+            assert len(error_diagnostics) > 0, "Expected at least one error diagnostic"
+
+            if test_uri in DOCUMENT_STATES:
+                DOCUMENT_STATES[test_uri].reset_graph()
+                del DOCUMENT_STATES[test_uri]
 
 
 if __name__ == "__main__":

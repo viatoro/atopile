@@ -24,6 +24,8 @@ module AdjustableRegulator from Regulator:
     To manage current draw of divider, constrain current or total_resistance
     """
 
+    # FIXME(simple-solver): AdjustableRegulator currently depends on the symbolic
+    # resistor-divider solver; use FBRK_FULL_SOLVER until that functionality returns.
     assert feedback_divider.v_in is output_voltage
     assert feedback_divider.v_out is reference_voltage
     assert feedback_divider.current within 1uA to 1mA  # TODO: remove default and make required

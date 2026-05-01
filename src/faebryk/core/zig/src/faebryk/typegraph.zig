@@ -17,6 +17,7 @@ const nodebuilder_mod = @import("nodebuilder.zig");
 const linker_mod = @import("linker.zig");
 const ascii = std.ascii;
 const trait_mod = @import("trait.zig");
+const cast = @import("cast");
 const graph = graph_mod.graph;
 const visitor = graph_mod.visitor;
 
@@ -201,7 +202,7 @@ pub const TypeGraph = struct {
                     dynamic: *graph.DynamicAttributes,
 
                     pub fn visit(ctx: *anyopaque, key: str, value: graph.Literal, _dynamic: bool) void {
-                        const s: *@This() = @ptrCast(@alignCast(ctx));
+                        const s = cast.ctx(@This(), ctx);
                         if (!_dynamic) return;
                         if (std.mem.eql(u8, key, "child_identifier")) {
                             return;
@@ -225,7 +226,7 @@ pub const TypeGraph = struct {
                     dynamic: *graph.DynamicAttributes,
 
                     pub fn visit(ctx: *anyopaque, key: str, value: graph.Literal, _dynamic: bool) void {
-                        const s: *@This() = @ptrCast(@alignCast(ctx));
+                        const s = cast.ctx(@This(), ctx);
                         if (!_dynamic) return;
                         // Skip internal MakeChild attributes
                         if (std.mem.eql(u8, key, "child_identifier")) return;
@@ -400,7 +401,7 @@ pub const TypeGraph = struct {
                 identifier: str,
 
                 pub fn visit(self_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(graph.BoundNodeReference) {
-                    const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                    const self = cast.ctx(@This(), self_ptr);
                     const make_child = EdgeComposition.get_child_node(bound_edge.edge);
                     const make_child_child_identifier = TypeGraph.MakeChildNode.Attributes.of(make_child).get_child_identifier();
                     if (make_child_child_identifier) |_make_child_child_identifier| {
@@ -581,7 +582,7 @@ pub const TypeGraph = struct {
                     dynamic: *graph.DynamicAttributes,
 
                     pub fn visit(ctx: *anyopaque, key: str, value: graph.Literal, _dynamic: bool) void {
-                        const s: *@This() = @ptrCast(@alignCast(ctx));
+                        const s = cast.ctx(@This(), ctx);
                         if (!_dynamic) return;
                         s.dynamic.put(key, value);
                     }
@@ -855,9 +856,12 @@ pub const TypeGraph = struct {
 
     /// Flatten source_type's structure into target_type.
     ///
-    ///  1. Copy MakeChild nodes. If a source child's identifier already exists
+    ///  1. Copy the "source" EdgePointer from the source type node to the target
+    ///     (the definition pointer used for layout reuse), if present and not
+    ///     already set on the target.
+    ///  2. Copy MakeChild nodes. If a source child's identifier already exists
     ///     on the target, the target's version wins (source child not copied).
-    ///  2. Copy MakeLink nodes. Target MakeLinks are collected *after* step 1,
+    ///  3. Copy MakeLink nodes. Target MakeLinks are collected *after* step 2,
     ///     so the dedup check sees the full set including freshly copied children.
     ///     Exact duplicates (same edge_type, lhs_path, rhs_path) are skipped.
     pub fn merge_types(
@@ -866,6 +870,14 @@ pub const TypeGraph = struct {
         source_type: BoundNodeReference,
     ) !void {
         const allocator = self.self_node.g.allocator;
+
+        // 1) Copy the "definition" pointer from source type node to target,
+        //    if present and not already set on the target.
+        if (EdgePointer.get_pointed_node_by_identifier(source_type, "definition")) |def_node| {
+            if (EdgePointer.get_pointed_node_by_identifier(target_type, "definition") == null) {
+                _ = EdgePointer.point_to(target_type, def_node.node, "definition", null) catch unreachable;
+            }
+        }
 
         // Collect source structure
         const source_children = self.collect_make_children(allocator, source_type);
@@ -1234,7 +1246,7 @@ pub const TypeGraph = struct {
                 self_ptr: *anyopaque,
                 edge: graph.BoundEdgeReference,
             ) visitor.VisitResult(BoundNodeReference) {
-                const ctx: *@This() = @ptrCast(@alignCast(self_ptr));
+                const ctx = cast.ctx(@This(), self_ptr);
                 const make_child = edge.g.bind(EdgeComposition.get_child_node(edge.edge));
 
                 const child_identifier = MakeChildNode.Attributes.of(make_child).get_child_identifier() orelse {
@@ -1347,10 +1359,8 @@ pub const TypeGraph = struct {
                                 }
                                 return error.ChildNotFound;
                             },
-                            else => return fallback_err,
                         };
                     },
-                    else => return err,
                 };
 
                 const child_type = MakeChildNode.get_child_type(make_child) orelse null;
@@ -1459,7 +1469,7 @@ pub const TypeGraph = struct {
             cb: *const fn (*anyopaque, MakeChildInfo) visitor.VisitResult(T),
 
             pub fn visit(self_ptr: *anyopaque, edge: graph.BoundEdgeReference) visitor.VisitResult(T) {
-                const s: *@This() = @ptrCast(@alignCast(self_ptr));
+                const s = cast.ctx(@This(), self_ptr);
                 const make_child = edge.g.bind(EdgeComposition.get_child_node(edge.edge));
                 const identifier = MakeChildNode.Attributes.of(make_child).get_child_identifier();
                 return s.cb(s.ctx, MakeChildInfo{
@@ -1493,7 +1503,7 @@ pub const TypeGraph = struct {
             list_ptr: *std.array_list.Managed(MakeChildInfo),
 
             pub fn collect(ctx_ptr: *anyopaque, info: MakeChildInfo) visitor.VisitResult(void) {
-                const ctx: *@This() = @ptrCast(@alignCast(ctx_ptr));
+                const ctx = cast.ctx(@This(), ctx_ptr);
                 ctx.list_ptr.append(info) catch @panic("OOM");
                 return visitor.VisitResult(void){ .CONTINUE = {} };
             }
@@ -1578,7 +1588,7 @@ pub const TypeGraph = struct {
             cb: *const fn (*anyopaque, MakeLinkInfo) visitor.VisitResult(T),
 
             pub fn visit(self_ptr: *anyopaque, edge: graph.BoundEdgeReference) visitor.VisitResult(T) {
-                const visitor_: *@This() = @ptrCast(@alignCast(self_ptr));
+                const visitor_ = cast.ctx(@This(), self_ptr);
                 const make_link = edge.g.bind(EdgeComposition.get_child_node(edge.edge));
 
                 const lhs_ref = EdgeComposition.get_child_by_identifier(make_link, "lhs");
@@ -1649,7 +1659,7 @@ pub const TypeGraph = struct {
             list_ptr: *std.array_list.Managed(MakeLinkInfo),
 
             pub fn collect(ctx_ptr: *anyopaque, info: MakeLinkInfo) visitor.VisitResult(void) {
-                const ctx: *@This() = @ptrCast(@alignCast(ctx_ptr));
+                const ctx = cast.ctx(@This(), ctx_ptr);
                 ctx.list_ptr.append(info) catch @panic("OOM");
                 return visitor.VisitResult(void){ .CONTINUE = {} };
             }
@@ -1698,7 +1708,6 @@ pub const TypeGraph = struct {
                 return err;
             },
             error.UnresolvedTypeReference => {},
-            else => return err,
         };
 
         const Visit = struct {
@@ -1709,7 +1718,7 @@ pub const TypeGraph = struct {
             cb: *const fn (*anyopaque, MakeChildInfo) visitor.VisitResult(T),
 
             pub fn visit(self_ptr: *anyopaque, info: MakeLinkInfo) visitor.VisitResult(T) {
-                const visitor_: *@This() = @ptrCast(@alignCast(self_ptr));
+                const visitor_ = cast.ctx(@This(), self_ptr);
 
                 // Check if lhs_path identifiers match container_path
                 if (info.lhs_path.len != visitor_.container_path_.len) {
@@ -1786,7 +1795,7 @@ pub const TypeGraph = struct {
             list_ptr: *std.array_list.Managed(MakeChildInfo),
 
             pub fn collect(ctx_ptr: *anyopaque, info: MakeChildInfo) visitor.VisitResult(void) {
-                const ctx: *@This() = @ptrCast(@alignCast(ctx_ptr));
+                const ctx = cast.ctx(@This(), ctx_ptr);
                 ctx.list_ptr.append(info) catch @panic("OOM");
                 return visitor.VisitResult(void){ .CONTINUE = {} };
             }
@@ -1847,7 +1856,7 @@ pub const TypeGraph = struct {
             error_identifier: []const u8 = "",
 
             pub fn visit(self_ptr: *anyopaque, info: MakeChildInfo) visitor.VisitResult(void) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
 
                 // 2.1) Resolve child instructions (identifier and type)
                 const referenced_type = MakeChildNode.get_child_type(info.make_child) orelse {
@@ -1947,7 +1956,7 @@ pub const TypeGraph = struct {
             error_identifier: []const u8 = "",
 
             pub fn visit(self_ptr: *anyopaque, edge: graph.BoundEdgeReference) visitor.VisitResult(void) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
 
                 const make_link = edge.g.bind(EdgeComposition.get_child_node(edge.edge));
 
@@ -2087,7 +2096,7 @@ pub const TypeGraph = struct {
             cb: *const fn (*anyopaque, BoundNodeReference) visitor.VisitResult(T),
 
             pub fn visit(self_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(T) {
-                const visitor_: *@This() = @ptrCast(@alignCast(self_ptr));
+                const visitor_ = cast.ctx(@This(), self_ptr);
                 const type_node = bound_edge.g.bind(EdgeComposition.get_child_node(bound_edge.edge));
                 return visitor_.cb(visitor_.ctx, type_node);
             }
@@ -2103,7 +2112,7 @@ pub const TypeGraph = struct {
             counts: *std.array_list.Managed(TypeInstanceCount),
 
             pub fn visit(self_ptr: *anyopaque, type_node: BoundNodeReference) visitor.VisitResult(void) {
-                const ctx: *@This() = @ptrCast(@alignCast(self_ptr));
+                const ctx = cast.ctx(@This(), self_ptr);
 
                 // Get type name
                 const type_name = TypeNodeAttributes.of(type_node.node).get_type_name();
@@ -2114,7 +2123,7 @@ pub const TypeGraph = struct {
                     count_ptr: *usize,
 
                     pub fn count_instance(counter_ptr: *anyopaque, _: graph.BoundEdgeReference) visitor.VisitResult(void) {
-                        const counter: *@This() = @ptrCast(@alignCast(counter_ptr));
+                        const counter = cast.ctx(@This(), counter_ptr);
                         counter.count_ptr.* += 1;
                         return visitor.VisitResult(void){ .CONTINUE = {} };
                     }
@@ -2169,7 +2178,7 @@ pub const TypeGraph = struct {
             names: *std.StringHashMap(NodeReference),
 
             pub fn visit(self_ptr: *anyopaque, type_node: BoundNodeReference) visitor.VisitResult(void) {
-                const ctx: *@This() = @ptrCast(@alignCast(self_ptr));
+                const ctx = cast.ctx(@This(), self_ptr);
                 const type_name = TypeNodeAttributes.of(type_node.node).get_type_name();
                 ctx.names.put(type_name, type_node.node) catch @panic("OOM");
                 return visitor.VisitResult(void){ .CONTINUE = {} };
@@ -2351,7 +2360,7 @@ pub const TypeGraph = struct {
 
             // Visitor for EdgeComposition children
             fn visit_composition(ctx_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(void) {
-                const ctx: *@This() = @ptrCast(@alignCast(ctx_ptr));
+                const ctx = cast.ctx(@This(), ctx_ptr);
                 const child = EdgeComposition.get_child_node(bound_edge.edge);
                 ctx.add_edge(bound_edge.edge, child);
                 return visitor.VisitResult(void){ .CONTINUE = {} };
@@ -2359,7 +2368,7 @@ pub const TypeGraph = struct {
 
             // Visitor for EdgePointer references
             fn visit_pointer(ctx_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(void) {
-                const ctx: *@This() = @ptrCast(@alignCast(ctx_ptr));
+                const ctx = cast.ctx(@This(), ctx_ptr);
                 const target = EdgePointer.get_referenced_node(bound_edge.edge);
                 ctx.add_edge(bound_edge.edge, target);
                 return visitor.VisitResult(void){ .CONTINUE = {} };
@@ -2367,7 +2376,7 @@ pub const TypeGraph = struct {
 
             // Visitor for EdgeTrait instances or owner
             fn visit_trait_instance_or_owner(ctx_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(void) {
-                const ctx: *@This() = @ptrCast(@alignCast(ctx_ptr));
+                const ctx = cast.ctx(@This(), ctx_ptr);
                 // Skip "has_source_chunk" trait edges - these point to source chunk nodes
                 // in the type graph and should not be copied (they would cause the entire
                 // source chunk subgraph to be copied, leading to issues during solver bootstrap).
@@ -2390,7 +2399,7 @@ pub const TypeGraph = struct {
 
             // Visitor for EdgeOperand references
             fn visit_operand(ctx_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(void) {
-                const ctx: *@This() = @ptrCast(@alignCast(ctx_ptr));
+                const ctx = cast.ctx(@This(), ctx_ptr);
                 const target = bound_edge.edge.get_target_node();
                 ctx.add_edge(bound_edge.edge, target);
                 return visitor.VisitResult(void){ .CONTINUE = {} };
@@ -2600,7 +2609,7 @@ test "basic instantiation" {
         seek: BoundNodeReference,
 
         pub fn visit(self_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(void) {
-            const self: *@This() = @ptrCast(@alignCast(self_ptr));
+            const self = cast.ctx(@This(), self_ptr);
             std.testing.expect(EdgePointer.is_instance(bound_edge.edge)) catch return visitor.VisitResult(void){ .ERROR = error.InvalidArgument };
             const referenced_node = EdgePointer.get_referenced_node(bound_edge.edge);
             if (referenced_node.is_same(self.seek.node)) {

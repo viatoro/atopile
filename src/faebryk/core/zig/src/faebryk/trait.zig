@@ -5,6 +5,7 @@ const edgecomposition_mod = @import("composition.zig");
 const node_type_mod = @import("node_type.zig");
 const edgebuilder_mod = @import("edgebuilder.zig");
 const std = @import("std");
+const cast = @import("cast");
 const EdgeType = node_type_mod.EdgeType;
 const Edge = graph.Edge;
 const BoundNodeReference = graph.BoundNodeReference;
@@ -66,7 +67,7 @@ pub const Trait = struct {
             cb: *const fn (*anyopaque, BoundNodeReference) visitor.VisitResult(T),
 
             pub fn visit(ctx_ptr: *anyopaque, bound_node: graph.BoundNodeReference) visitor.VisitResult(T) {
-                const self: *@This() = @ptrCast(@alignCast(ctx_ptr));
+                const self = cast.ctx(@This(), ctx_ptr);
                 const trait_instance_owner = EdgeTrait.get_owner_node_of(bound_node) orelse return visitor.VisitResult(T){ .CONTINUE = {} };
                 return self.cb(self.cb_ctx, trait_instance_owner);
             }
@@ -82,7 +83,7 @@ pub const Trait = struct {
             cb: *const fn (*anyopaque, BoundNodeReference) visitor.VisitResult(T),
 
             pub fn visit(ctx_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(T) {
-                const self: *@This() = @ptrCast(@alignCast(ctx_ptr));
+                const self = cast.ctx(@This(), ctx_ptr);
                 const trait_instance = bound_edge.g.bind(EdgeType.get_instance_node(bound_edge.edge).?);
                 return self.cb(self.cb_ctx, trait_instance);
             }
@@ -194,7 +195,7 @@ pub const EdgeTrait = struct {
             cb: *const fn (*anyopaque, graph.BoundEdgeReference) visitor.VisitResult(T),
 
             pub fn visit(self_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(T) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
                 const trait_instance = bound_edge.g.bind(EdgeTrait.get_trait_instance_node(bound_edge.edge));
                 if (!EdgeType.is_node_instance_of(trait_instance, self.trait_type)) {
                     return visitor.VisitResult(T){ .CONTINUE = {} };
@@ -226,7 +227,7 @@ pub const EdgeTrait = struct {
             identifier: graph.str,
 
             pub fn visit(self_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(graph.BoundNodeReference) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
                 // Skip trait edges without a name - only match by identifier if name is set
                 const edge_name = bound_edge.edge.get_attribute_name() orelse return visitor.VisitResult(graph.BoundNodeReference){ .CONTINUE = {} };
                 if (std.mem.eql(u8, edge_name, self.identifier)) {

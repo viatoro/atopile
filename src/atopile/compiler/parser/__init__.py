@@ -3,9 +3,9 @@ import subprocess
 from pathlib import Path
 
 from atopile.logging import get_logger
+from faebryk.libs.git import has_uncommitted_changes
 from faebryk.libs.util import (
     global_lock,
-    has_uncommitted_changes,
     is_editable_install,
     run_live,
 )

@@ -2,6 +2,7 @@ const std = @import("std");
 const py = @import("pybindings.zig");
 const type_registry = @import("type_registry.zig");
 const util = @import("util.zig");
+const cast = @import("cast");
 
 // Auto-generated Python wrapper for a Zig struct
 pub fn PyObjectWrapper(comptime T: type) type {
@@ -9,13 +10,20 @@ pub fn PyObjectWrapper(comptime T: type) type {
         ob_base: py.PyObject_HEAD,
         data: *T,
         owned: bool = false,
+        parent: ?*py.PyObject = null,
     };
 }
 
 fn genStructDealloc(comptime WrapperType: type) type {
     return struct {
         pub fn impl(self: *py.PyObject) callconv(.c) void {
-            const wrapper_obj: *WrapperType = @ptrCast(@alignCast(self));
+            const wrapper_obj = cast.ctx(WrapperType, self);
+            if (@hasField(WrapperType, "parent")) {
+                if (wrapper_obj.parent) |parent| {
+                    py.Py_DECREF(parent);
+                    wrapper_obj.parent = null;
+                }
+            }
             if (@hasField(WrapperType, "owned") and wrapper_obj.owned) {
                 std.heap.c_allocator.destroy(wrapper_obj.data);
                 wrapper_obj.owned = false;
@@ -43,7 +51,7 @@ fn genZigAddress(comptime WrapperType: type, comptime T: type) type {
         // Return a stable identifier for the Python-side wrapper
         pub fn impl(self: ?*py.PyObject, args: ?*py.PyObject) callconv(.c) ?*py.PyObject {
             _ = args; // No arguments needed
-            const wrapper_obj: *WrapperType = @ptrCast(@alignCast(self));
+            const wrapper_obj = cast.ctx(WrapperType, self);
             // Use underlying Zig struct address (stable if buffer not reallocated)
             return py.PyLong_FromUnsignedLongLong(@intFromPtr(wrapper_obj.data));
         }
@@ -250,7 +258,7 @@ pub fn castWrapper(
         return null;
     }
 
-    return @as(*Wrapper, @ptrCast(@alignCast(obj.?)));
+    return cast.ctx(Wrapper, obj.?);
 }
 
 pub fn is_pyobject(comptime T: type) bool {
@@ -402,7 +410,7 @@ pub fn wrap_obj(
         return null;
     }
 
-    const wrapper = @as(*Wrapper, @ptrCast(@alignCast(pyobj)));
+    const wrapper = cast.ctx(Wrapper, pyobj);
     wrapper.ob_base = py.PyObject_HEAD{ .ob_refcnt = 1, .ob_type = type_obj };
     wrapper.data = data_ptr;
     if (comptime @hasField(Wrapper, "owned")) {

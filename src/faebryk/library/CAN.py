@@ -23,11 +23,14 @@ class CAN(fabll.Node):
     #                 traits
     # ----------------------------------------
     _is_interface = fabll.Traits.MakeEdge(fabll.is_interface.MakeChild())
+    is_data_interface = fabll.Traits.MakeEdge(
+        F.DataInterface.is_data_interface.MakeChild()
+    )
 
     # ISO 11898: CAN bus differential impedance 120 Ohm +/- 10%
     _parameter_constraints = [
         F.Literals.Numbers.MakeChild_SetSuperset(
-            [diff_pair, F.DifferentialPair.impedance],
+            [diff_pair, F.DifferentialPair.differential_impedance],
             108.0,
             132.0,
             unit=F.Units.Ohm,
@@ -60,7 +63,7 @@ class CAN(fabll.Node):
 
         can_bus = new CAN
         can_bus.speed = 250kbps  # Common CAN speeds: 125k, 250k, 500k, 1Mbps
-        can_bus.diff_pair.impedance = 120ohm +/- 5%
+        can_bus.diff_pair.differential_impedance = 120ohm +/- 5%
 
         # Connect power reference for logic levels
         power_5v = new ElectricPower

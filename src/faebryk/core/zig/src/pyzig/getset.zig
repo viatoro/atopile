@@ -4,6 +4,7 @@ const compat = @import("compat");
 const linked_list = @import("linked_list.zig");
 const util = @import("util.zig");
 const pyzig = @import("pyzig.zig");
+const cast = @import("cast");
 
 inline fn castSelf(comptime T: type, obj: ?*py.PyObject) *T {
     return @ptrCast(@alignCast(obj.?));
@@ -199,7 +200,7 @@ fn obj_prop(comptime struct_type: type, comptime field_name: [*:0]const u8, comp
             const pyobj = py.PyType_GenericAlloc(type_obj, 0);
             if (pyobj == null) return null;
 
-            const typed_obj: *PType = @ptrCast(@alignCast(pyobj));
+            const typed_obj = cast.ctx(PType, pyobj);
             typed_obj.ob_base = py.PyObject_HEAD{ .ob_refcnt = 1, .ob_type = type_obj };
 
             if (@hasField(PType, "data")) {
@@ -212,6 +213,10 @@ fn obj_prop(comptime struct_type: type, comptime field_name: [*:0]const u8, comp
             if (comptime @hasField(PType, "owned")) {
                 typed_obj.owned = false;
             }
+            if (comptime @hasField(PType, "parent")) {
+                typed_obj.parent = self;
+                py.Py_INCREF(self.?);
+            }
 
             return pyobj;
         }
@@ -223,7 +228,7 @@ fn obj_prop(comptime struct_type: type, comptime field_name: [*:0]const u8, comp
             const obj = castSelf(struct_type, self);
             if (value == null) return -1;
 
-            const pyval: *PType = @ptrCast(@alignCast(value));
+            const pyval = cast.ctx(PType, value);
             const field_ptr = wrapperFieldPtr(struct_type, FieldType, field_name_slice, obj);
             field_ptr.* = wrapperDataValue(PType, pyval);
             return 0;
@@ -328,9 +333,11 @@ fn optional_prop(comptime struct_type: type, comptime field_name: [*:0]const u8,
                         if (pyobj == null) return null;
 
                         const NestedWrapper = pyzig.PyObjectWrapper(ChildType);
-                        const wrapper: *NestedWrapper = @ptrCast(@alignCast(pyobj));
+                        const wrapper = cast.ctx(NestedWrapper, pyobj);
                         wrapper.data = &field_ptr.*.?;
                         wrapper.owned = false;
+                        wrapper.parent = self;
+                        py.Py_INCREF(self.?);
                         return pyobj;
                     },
                     .@"enum" => {
@@ -389,7 +396,7 @@ fn optional_prop(comptime struct_type: type, comptime field_name: [*:0]const u8,
                 },
                 .@"struct" => {
                     const WrapperType = pyzig.PyObjectWrapper(ChildType);
-                    const wrapper_obj: *WrapperType = @ptrCast(@alignCast(value));
+                    const wrapper_obj = cast.ctx(WrapperType, value);
                     field_ptr.* = wrapper_obj.data.*;
                 },
                 else => {
@@ -426,7 +433,7 @@ fn linked_list_prop(comptime struct_type: type, comptime field_name: [*:0]const 
                 pyzig.ensureTypeObject(ChildType, type_name_for_registry, "Failed to initialize linked_list nested type")
             else
                 null;
-            return linked_list.createMutableList(ChildType, list_ptr, element_type_obj);
+            return linked_list.createMutableList(ChildType, list_ptr, element_type_obj, self);
         }
     }.impl;
 
@@ -457,7 +464,7 @@ fn linked_list_prop(comptime struct_type: type, comptime field_name: [*:0]const 
                 const child_ti = @typeInfo(ChildType);
                 switch (child_ti) {
                     .@"struct" => {
-                        const nested = @as(*pyzig.PyObjectWrapper(ChildType), @ptrCast(@alignCast(item)));
+                        const nested = cast.ctx(pyzig.PyObjectWrapper(ChildType), item);
                         node.* = NodeType{ .data = nested.data.* };
                     },
                     .@"enum" => {
@@ -548,10 +555,12 @@ fn struct_prop(comptime struct_type: type, comptime field_name: [*:0]const u8, c
             if (pyobj == null) return null;
 
             const NestedWrapper = pyzig.PyObjectWrapper(FieldType);
-            const wrapper: *NestedWrapper = @ptrCast(@alignCast(pyobj));
+            const wrapper = cast.ctx(NestedWrapper, pyobj);
             wrapper.ob_base = py.PyObject_HEAD{ .ob_refcnt = 1, .ob_type = type_obj };
             wrapper.data = nested_data;
             wrapper.owned = false;
+            wrapper.parent = self;
+            py.Py_INCREF(self.?);
             return pyobj;
         }
     }.impl;
@@ -562,7 +571,7 @@ fn struct_prop(comptime struct_type: type, comptime field_name: [*:0]const u8, c
             if (value == null) return -1;
 
             const NestedWrapper = pyzig.PyObjectWrapper(FieldType);
-            const nested_wrapper = @as(*NestedWrapper, @ptrCast(@alignCast(value)));
+            const nested_wrapper = cast.ctx(NestedWrapper, value);
             const field_ptr = wrapperFieldPtr(struct_type, FieldType, field_name_slice, obj);
             field_ptr.* = nested_wrapper.data.*;
 

@@ -114,7 +114,7 @@ def _format_source_info(source_chunk: "AST.SourceChunk | None") -> str:
         try:
             with open(file_path) as f:
                 lines = f.read().splitlines()
-        except (FileNotFoundError, OSError):
+        except FileNotFoundError, OSError:
             return source_header
 
         context = 2
@@ -216,18 +216,6 @@ def find_interface_connection_errors(
         f"across {len(interface_nodes)} interface nodes"
     )
 
-    # Types that are compatible despite being different
-    COMPATIBLE_TYPE_PAIRS: frozenset[frozenset[str]] = frozenset(
-        {frozenset({"ElectricLogic", "ElectricSignal"})}
-    )
-
-    def are_types_compatible(type1: str | None, type2: str | None) -> bool:
-        if type1 is None or type2 is None:
-            return True
-        if type1 == type2:
-            return True
-        return frozenset({type1, type2}) in COMPATIBLE_TYPE_PAIRS
-
     # Check each edge
     for bound_edge in all_edges:
         edge = bound_edge.edge()
@@ -261,7 +249,11 @@ def find_interface_connection_errors(
         source_type = source_node.get_type_name()
         target_type = target_node.get_type_name()
 
-        if not are_types_compatible(source_type, target_type):
+        if (
+            source_type is not None
+            and target_type is not None
+            and source_type != target_type
+        ):
             source_chunk = _get_connection_source_chunk(source_node, target_node, tg)
             errors_found.append(
                 InterfaceConnectionError(
@@ -357,7 +349,7 @@ class ERCFaultIncompatibleInterfaceConnection(ERCFault):
             source_type=source_type,
             target_type=target_type,
             source_chunk=source_chunk,
-            include_source_info=True,
+            include_source_info=False,
         )
 
         return cls(
@@ -454,7 +446,7 @@ class needs_erc_check(fabll.Node):
                     source_type=start_node.get_type_name(),
                     target_type=end_node.get_type_name(),
                     source_chunk=source_chunk,
-                    include_source_info=True,
+                    include_source_info=False,
                 )
                 with accumulator.collect():
                     raise ERCFaultShortedInterfaces(
@@ -474,11 +466,50 @@ class needs_erc_check(fabll.Node):
             logger.info("Checking for power source shorts")
             for ep_bus in ep_buses.values():
                 with accumulator.collect():
-                    sources = {ep for ep in ep_bus if ep.has_trait(F.is_source)}
-                    if len(sources) <= 1:
+                    # Classify each EP once: bidirectional (source+sink),
+                    # pure source, or pure sink
+                    bidirectional: set = set()
+                    pure_sources: set = set()
+                    pure_sinks: set = set()
+                    for ep in ep_bus:
+                        is_src = ep.has_trait(F.is_source)
+                        is_snk = ep.has_trait(F.is_sink)
+                        if is_src and is_snk:
+                            bidirectional.add(ep)
+                        elif is_src:
+                            pure_sources.add(ep)
+                        elif is_snk:
+                            pure_sinks.add(ep)
+
+                    if bidirectional and (pure_sources or pure_sinks):
+                        friendly_bidir = ", ".join(
+                            n.get_full_name() for n in bidirectional
+                        )
+                        parts = []
+                        if pure_sources:
+                            parts.append(
+                                "source(s) ["
+                                + ", ".join(n.get_full_name() for n in pure_sources)
+                                + "]"
+                            )
+                        if pure_sinks:
+                            parts.append(
+                                "sink(s) ["
+                                + ", ".join(n.get_full_name() for n in pure_sinks)
+                                + "]"
+                            )
+                        logger.warning(
+                            f"Bidirectional ElectricalPower(s) [{friendly_bidir}] "
+                            "share a bus with unidirectional ElectricalPower(s) "
+                            f"[{', '.join(parts)}]. Be sure this connection is correct."
+                        )
+
+                    if len(pure_sources) <= 1:
                         continue
 
-                    friendly_sources = ", ".join(n.get_full_name() for n in sources)
+                    friendly_sources = ", ".join(
+                        n.get_full_name() for n in pure_sources
+                    )
                     raise ERCPowerSourcesShortedError(
                         f"Power sources shorted: {friendly_sources}"
                     )
@@ -510,7 +541,7 @@ class needs_erc_check(fabll.Node):
                         source_type=error.source_type,
                         target_type=error.target_type,
                         source_chunk=error.source_chunk,
-                        include_source_info=True,
+                        include_source_info=False,
                     ),
                     source_py,
                     target_py,
@@ -700,6 +731,61 @@ class Test:
         power_out_1._is_interface.get().connect_to(power_out_2)
 
         self._run_checks(tg)
+
+    def test_erc_bidirectional_no_short(self):
+        """
+        A bidirectional EP (source + sink) on the same bus as a pure source
+        should not be flagged as a short, but should warn.
+        """
+        from unittest.mock import patch
+
+        g = fabll.graph.GraphView.create()
+        tg = fbrk.TypeGraph.create(g=g)
+
+        pure_source = F.ElectricPower.bind_typegraph(tg).create_instance(g=g)
+        bidir = F.ElectricPower.bind_typegraph(tg).create_instance(g=g)
+
+        pure_source.make_source()
+        bidir.make_source()
+        bidir.make_sink()
+
+        pure_source._is_interface.get().connect_to(bidir)
+
+        # should not raise, but should warn about bidirectional + unidirectional
+        with patch.object(logger, "warning") as mock_warn:
+            self._run_checks(tg)
+
+        assert mock_warn.called
+        msg = mock_warn.call_args[0][0] % mock_warn.call_args[0][1:]
+        assert bidir.get_full_name() in msg
+        assert pure_source.get_full_name() in msg
+
+    def test_erc_bidirectional_with_two_pure_sources_short(self):
+        """
+        Two pure sources on the same bus should still be flagged even if a
+        bidirectional EP is also present.
+        """
+        g = fabll.graph.GraphView.create()
+        tg = fbrk.TypeGraph.create(g=g)
+
+        source1 = F.ElectricPower.bind_typegraph(tg).create_instance(g=g)
+        source2 = F.ElectricPower.bind_typegraph(tg).create_instance(g=g)
+        bidir = F.ElectricPower.bind_typegraph(tg).create_instance(g=g)
+
+        source1.make_source()
+        source2.make_source()
+        bidir.make_source()
+        bidir.make_sink()
+
+        source1._is_interface.get().connect_to(source2)
+        source2._is_interface.get().connect_to(bidir)
+
+        with pytest.raises(ERCPowerSourcesShortedError) as exc_info:
+            self._run_checks(tg)
+        msg = str(exc_info.value)
+        assert source1.get_full_name() in msg
+        assert source2.get_full_name() in msg
+        assert bidir.get_full_name() not in msg
 
     def test_verify_graph_interface_type_same_type_compatible(self):
         """

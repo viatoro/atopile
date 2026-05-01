@@ -15,6 +15,9 @@ class USB2_0(fabll.Node):
     #                 traits
     # ----------------------------------------
     _is_interface = fabll.Traits.MakeEdge(fabll.is_interface.MakeChild())
+    is_data_interface = fabll.Traits.MakeEdge(
+        F.DataInterface.is_data_interface.MakeChild()
+    )
 
     # can_bridge allows USB2_0 to be used with ~> operator
     # Points to usb_if for both in and out (passthrough)

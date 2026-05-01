@@ -1,81 +1,159 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
-import threading
-from contextlib import contextmanager
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from atopile.server.agent.message_log import TrackedChecklistItem, TrackedMessage
-
-from atopile.dataclasses import AgentEventRow, Build, BuildStatus, LogRow, TestLogRow
+from atopile.data_models import (
+    AgentEventRow,
+    Build,
+    BuildStatus,
+    LogRow,
+    ResolvedBuildTarget,
+    TestLogRow,
+)
 from atopile.logging import get_logger
 from faebryk.libs.paths import get_log_dir
+from faebryk.libs.util import robustly_rm_dir
+
+LOG_VER = 3
 
 BUILD_HISTORY_DB = get_log_dir() / Path("build_history.db")
 TEST_LOGS_DB = get_log_dir() / Path("test_logs.db")
 BUILD_LOGS_DB = get_log_dir() / Path("build_logs.db")
 AGENT_LOGS_DB = get_log_dir() / Path("agent_logs.db")
 
+LOG_DBS = (BUILD_HISTORY_DB, TEST_LOGS_DB, BUILD_LOGS_DB, AGENT_LOGS_DB)
+
+# Soft FIFO cap. File size can briefly exceed this between trim passes and
+# stays pinned at its high-water mark (no VACUUM); freed pages are reused by
+# future inserts so the file stops growing past the cap in steady state.
+LOG_DB_CAP_BYTES = 10 * 1024**3
+_TRIM_CHUNK_ROWS = 10_000
+
 logger = get_logger(__name__)
 
-# Thread-local storage for database connections
-# Each thread gets its own connection to avoid race conditions
-_thread_local = threading.local()
-_init_lock = threading.Lock()
+
+def _db_size_bytes(conn: sqlite3.Connection) -> int:
+    # Live (non-freelist) bytes. We intentionally don't VACUUM, so page_count
+    # never shrinks after a delete — use freelist_count to measure actual
+    # data in use instead of file size on disk.
+    page_count = conn.execute("PRAGMA page_count").fetchone()[0]
+    freelist_count = conn.execute("PRAGMA freelist_count").fetchone()[0]
+    page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+    return (page_count - freelist_count) * page_size
 
 
-def _ensure_db_dir(db_path: Path) -> None:
-    """Ensure database directory exists (called once per database)."""
-    with _init_lock:
-        db_path.parent.mkdir(parents=True, exist_ok=True)
+def _enforce_size_cap(conn: sqlite3.Connection, table: str) -> None:
+    if _db_size_bytes(conn) <= LOG_DB_CAP_BYTES:
+        return
+
+    logger.warning(
+        "%s exceeded %.1f GiB cap; trimming oldest rows",
+        table,
+        LOG_DB_CAP_BYTES / 1024**3,
+    )
+    while _db_size_bytes(conn) > LOG_DB_CAP_BYTES:
+        cursor = conn.execute(
+            f"DELETE FROM {table} WHERE id IN ("
+            f"SELECT id FROM {table} ORDER BY id ASC LIMIT ?)",
+            (_TRIM_CHUNK_ROWS,),
+        )
+        if cursor.rowcount == 0:
+            break
+
+
+def _sqlite_artifact_paths(db_path: Path) -> tuple[Path, ...]:
+    return (
+        db_path,
+        db_path.with_name(f"{db_path.name}-wal"),
+        db_path.with_name(f"{db_path.name}-shm"),
+    )
+
+
+def _reset_log_storage_if_schema_mismatched(db_path: Path) -> None:
+    if not db_path.exists():
+        return
+
+    try:
+        with closing(sqlite3.connect(db_path)) as conn:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+    except sqlite3.DatabaseError:
+        delete_log_storage((db_path,))
+        return
+    if version != LOG_VER:
+        delete_log_storage((db_path,))
+        return
+
+
+def delete_log_storage(db_paths: tuple[Path, ...] | None = None) -> None:
+    for db_path in db_paths or LOG_DBS:
+        for artifact in _sqlite_artifact_paths(db_path):
+            try:
+                artifact.unlink(missing_ok=True)
+            except PermissionError as exc:
+                raise RuntimeError(
+                    f"Could not reset locked log database: {artifact}. "
+                    "Close other atopile processes and try again."
+                ) from exc
+
+    log_dir = get_log_dir()
+    if log_dir.exists() and not any(log_dir.iterdir()):
+        robustly_rm_dir(log_dir)
+
+
+def initialize_log_storage() -> None:
+    BuildHistory.init_db()
+    Logs.init_db()
+    TestLogs.init_db()
+    AgentSessions.init_db()
+    AgentLogs.init_db()
 
 
 @contextmanager
-def _get_connection(db_path: Path, timeout: float = 30.0):
-    """
-    Get a thread-local database connection, creating one if needed.
-    Each thread gets its own connection to avoid race conditions.
-    """
-    # Get or create thread-local connection dict
-    if not hasattr(_thread_local, "connections"):
-        _thread_local.connections = {}
-
-    connections = _thread_local.connections
-
-    if db_path not in connections:
-        _ensure_db_dir(db_path)
-        conn = sqlite3.connect(db_path, timeout=timeout)
-        # Enable WAL mode for better concurrent access
-        conn.execute("PRAGMA journal_mode=WAL")
-        connections[db_path] = conn
-
-    conn = connections[db_path]
+def _get_connection(
+    db_path: Path, timeout: float = 30.0
+) -> Iterator[sqlite3.Connection]:
+    """Open a fresh connection for each access and close it on exit."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path, timeout=timeout)
+    conn.execute("PRAGMA journal_mode=WAL")
     try:
         yield conn
         conn.commit()
     except Exception:
         conn.rollback()
         raise
+    finally:
+        conn.close()
+
+
+@contextmanager
+def _get_init_connection(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """Open a connection for init_db and warn if init creates a new empty DB."""
+    _reset_log_storage_if_schema_mismatched(db_path)
+    created_empty_db = not db_path.exists()
+    with _get_connection(db_path) as conn:
+        yield conn
+    if created_empty_db:
+        logger.warning("Created new empty SQLite database during init: %s", db_path)
 
 
 # build_history.db -> build_history schema helper
 class BuildHistory:
     @staticmethod
     def init_db() -> None:
-        with _get_connection(BUILD_HISTORY_DB) as conn:
-            conn.executescript("""
+        with _get_init_connection(BUILD_HISTORY_DB) as conn:
+            conn.executescript(f"""
                 CREATE TABLE IF NOT EXISTS build_history (
                     build_id         TEXT PRIMARY KEY,
                     name             TEXT,
-                    display_name     TEXT,
                     project_name     TEXT,
                     project_root     TEXT,
-                    target           TEXT,
-                    entry            TEXT,
+                    target           TEXT NOT NULL,
                     status           TEXT,
                     return_code      INTEGER,
                     error            TEXT,
@@ -85,24 +163,21 @@ class BuildHistory:
                     total_stages     INTEGER,
                     warnings         INTEGER,
                     errors           INTEGER,
-                    timestamp        TEXT,
                     standalone       INTEGER,
                     frozen           INTEGER
                 );
-                CREATE INDEX IF NOT EXISTS idx_build_history_project_target
-                    ON build_history(project_root, target, started_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_build_history_project_name
+                    ON build_history(project_root, name, started_at DESC);
+                PRAGMA user_version = {LOG_VER};
             """)
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> Build:
-        return Build(
+        build = Build(
             build_id=row["build_id"],
-            name=row["name"] or "default",
-            display_name=row["display_name"] or "default",
             project_name=row["project_name"],
             project_root=row["project_root"],
-            target=row["target"],
-            entry=row["entry"],
+            target=ResolvedBuildTarget.model_validate_json(row["target"]),
             status=BuildStatus(row["status"]),
             return_code=row["return_code"],
             error=row["error"],
@@ -112,10 +187,12 @@ class BuildHistory:
             total_stages=row["total_stages"],
             warnings=row["warnings"],
             errors=row["errors"],
-            timestamp=row["timestamp"],
             standalone=bool(row["standalone"]),
             frozen=bool(row["frozen"]),
         )
+        if row["name"]:
+            build.name = row["name"]
+        return build
 
     @staticmethod
     def set(build: Build) -> None:
@@ -137,6 +214,17 @@ class BuildHistory:
                     BuildHistory._from_row(existing_row) if existing_row else None
                 )
 
+                # Don't allow a non-terminal status to overwrite a terminal one.
+                # This prevents race conditions where a worker's stage update
+                # (status=BUILDING) overwrites a CANCELLED/FAILED status.
+                _TERMINAL = {"cancelled", "failed", "success", "warning"}
+                if (
+                    existing
+                    and existing.status.value in _TERMINAL
+                    and build.status.value not in _TERMINAL
+                ):
+                    return
+
                 # Helper to pick new value or fall back to existing
                 def pick(new_val, existing_val):
                     return new_val if new_val is not None else existing_val
@@ -144,20 +232,16 @@ class BuildHistory:
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO build_history
-                        (build_id, name, display_name, project_name,
-                         project_root, target, entry, status,
+                        (build_id, name, project_name,
+                         project_root, target, status,
                          return_code, error, started_at,
                          elapsed_seconds, stages, total_stages, warnings,
-                         errors, timestamp, standalone, frozen)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         errors, standalone, frozen)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         build.build_id,
                         pick(build.name, existing.name if existing else None),
-                        pick(
-                            build.display_name,
-                            existing.display_name if existing else None,
-                        ),
                         pick(
                             build.project_name,
                             existing.project_name if existing else None,
@@ -166,8 +250,12 @@ class BuildHistory:
                             build.project_root,
                             existing.project_root if existing else None,
                         ),
-                        pick(build.target, existing.target if existing else None),
-                        pick(build.entry, existing.entry if existing else None),
+                        pick(
+                            build.target.model_dump_json(by_alias=True),
+                            existing.target.model_dump_json(by_alias=True)
+                            if existing
+                            else None,
+                        ),
                         build.status.value,  # status is always set
                         pick(
                             build.return_code,
@@ -180,9 +268,15 @@ class BuildHistory:
                         build.elapsed_seconds
                         if build.elapsed_seconds
                         else (existing.elapsed_seconds if existing else 0.0),
-                        json.dumps(build.stages)
-                        if build.stages
-                        else (json.dumps(existing.stages) if existing else "[]"),
+                        json.dumps(
+                            [
+                                stage.model_dump(mode="json", by_alias=True)
+                                for stage in (
+                                    build.stages
+                                    or (existing.stages if existing else [])
+                                )
+                            ]
+                        ),
                         pick(
                             build.total_stages,
                             existing.total_stages if existing else None,
@@ -193,7 +287,6 @@ class BuildHistory:
                         build.errors
                         if build.errors
                         else (existing.errors if existing else 0),
-                        pick(build.timestamp, existing.timestamp if existing else None),
                         int(bool(build.standalone))
                         if build.standalone
                         else (int(bool(existing.standalone)) if existing else 0),
@@ -205,9 +298,9 @@ class BuildHistory:
         except Exception:
             logger.exception(
                 f"Failed to save build {build.build_id} to history. "
-                "Try running 'ato dev clear_logs'."
+                "Try running 'ato dev clear-logs'."
             )
-            os._exit(1)
+            raise
 
     @staticmethod
     def get(build_id: str) -> Build | None:
@@ -225,9 +318,9 @@ class BuildHistory:
         except Exception:
             logger.exception(
                 f"Failed to get build {build_id} from history. "
-                "Try running 'ato dev clear_logs'."
+                "Try running 'ato dev clear-logs'."
             )
-            os._exit(1)
+            raise
 
     @staticmethod
     def get_all(limit: int = 50) -> list[Build]:
@@ -242,29 +335,165 @@ class BuildHistory:
                 return [BuildHistory._from_row(r) for r in rows]
         except Exception as e:
             logger.exception(
-                "Failed to load build history. Try running 'ato dev clear_logs'."
+                "Failed to load build history. Try running 'ato dev clear-logs'."
             )
             raise e
 
     @staticmethod
-    def get_latest_for_target(project_root: str, target: str) -> Build | None:
-        """Get the most recent build for a specific project/target."""
+    def get_latest_finished_per_target(limit: int = 100) -> list[Build]:
+        """Get the latest completed build per target root and target name."""
         try:
             with _get_connection(BUILD_HISTORY_DB) as conn:
                 conn.row_factory = sqlite3.Row
-                row = conn.execute(
+                rows = conn.execute(
+                    """
+                    SELECT * FROM build_history
+                    WHERE rowid IN (
+                        SELECT rowid FROM (
+                            SELECT rowid, ROW_NUMBER() OVER (
+                                PARTITION BY
+                                    json_extract(target, '$.root'),
+                                    name,
+                                    json_extract(target, '$.entry')
+                                ORDER BY started_at DESC
+                            ) AS rn
+                            FROM build_history
+                            WHERE status NOT IN ('queued', 'building')
+                        ) WHERE rn = 1
+                    )
+                    ORDER BY started_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+                return [BuildHistory._from_row(r) for r in rows]
+        except Exception as e:
+            logger.exception(
+                "Failed to get latest finished builds per target. "
+                "Try running 'ato dev clear-logs'."
+            )
+            raise e
+
+    @staticmethod
+    def get_queued(limit: int = 100) -> list[Build]:
+        """Get queued builds in FIFO order."""
+        try:
+            with _get_connection(BUILD_HISTORY_DB) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    """
+                    SELECT * FROM build_history
+                    WHERE status = 'queued'
+                    ORDER BY started_at ASC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+                return [BuildHistory._from_row(r) for r in rows]
+        except Exception as e:
+            logger.exception(
+                "Failed to get queued builds. Try running 'ato dev clear-logs'."
+            )
+            raise e
+
+    @staticmethod
+    def cleanup_stale() -> int:
+        """Mark leftover 'building'/'queued' entries as failed.
+
+        Called at server startup to clear entries from a previous crash.
+        Returns the number of rows updated.
+        """
+        try:
+            with _get_connection(BUILD_HISTORY_DB) as conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE build_history
+                    SET status = 'failed',
+                        error = 'Server restarted while build was in progress'
+                    WHERE status IN ('queued', 'building')
+                    """,
+                )
+                count = cursor.rowcount
+                if count:
+                    logger.info(
+                        "Cleaned up %d stale build(s) from previous session", count
+                    )
+                return count
+        except Exception as e:
+            logger.warning("Failed to clean up stale builds: %s", e)
+            return 0
+
+    @staticmethod
+    def get_building(limit: int = 100) -> list[Build]:
+        """Get running builds."""
+        try:
+            with _get_connection(BUILD_HISTORY_DB) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    """
+                    SELECT * FROM build_history
+                    WHERE status = 'building'
+                    ORDER BY started_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+                return [BuildHistory._from_row(r) for r in rows]
+        except Exception as e:
+            logger.exception(
+                "Failed to get running builds. Try running 'ato dev clear-logs'."
+            )
+            raise e
+
+    @staticmethod
+    def get_finished(limit: int = 100) -> list[Build]:
+        """Get builds with status other than 'queued' or 'building'."""
+        try:
+            with _get_connection(BUILD_HISTORY_DB) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    """
+                    SELECT * FROM build_history
+                    WHERE status NOT IN ('queued', 'building')
+                    ORDER BY started_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+                return [BuildHistory._from_row(r) for r in rows]
+        except Exception as e:
+            logger.exception(
+                "Failed to get finished builds. Try running 'ato dev clear-logs'."
+            )
+            raise e
+
+    @staticmethod
+    def get_latest_finished_for_target(
+        target: ResolvedBuildTarget,
+    ) -> Build | None:
+        """Get the most recent completed build for a specific project/target."""
+        try:
+            with _get_connection(BUILD_HISTORY_DB) as conn:
+                conn.row_factory = sqlite3.Row
+                params: list[str] = [
+                    target.name,
+                    target.root,
+                ]
+                query = (
                     "SELECT * FROM build_history"
-                    " WHERE project_root = ? AND target = ?"
-                    " ORDER BY started_at DESC LIMIT 1",
-                    (project_root, target),
-                ).fetchone()
+                    " WHERE name = ?"
+                    " AND json_extract(target, '$.root') = ?"
+                    " AND status NOT IN ('queued', 'building')"
+                )
+                query += " ORDER BY started_at DESC LIMIT 1"
+                row = conn.execute(query, params).fetchone()
                 if row is None:
                     return None
                 return BuildHistory._from_row(row)
         except Exception as e:
             logger.exception(
-                "Failed to get latest build for target. "
-                "Try running 'ato dev clear_logs'."
+                "Failed to get latest finished build for target. "
+                "Try running 'ato dev clear-logs'."
             )
             raise e
 
@@ -273,8 +502,8 @@ class BuildHistory:
 class Logs:
     @staticmethod
     def init_db() -> None:
-        with _get_connection(BUILD_LOGS_DB) as conn:
-            conn.executescript("""
+        with _get_init_connection(BUILD_LOGS_DB) as conn:
+            conn.executescript(f"""
                 CREATE TABLE IF NOT EXISTS logs (
                     id                INTEGER PRIMARY KEY AUTOINCREMENT,
                     build_id          TEXT,
@@ -291,6 +520,7 @@ class Logs:
                     objects           TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_logs_build_id ON logs(build_id);
+                PRAGMA user_version = {LOG_VER};
             """)
 
     @staticmethod
@@ -347,6 +577,7 @@ class Logs:
                     for e in entries
                 ],
             )
+            _enforce_size_cap(conn, "logs")
 
     @staticmethod
     def fetch_chunk(
@@ -398,8 +629,8 @@ class Logs:
 class TestLogs:
     @staticmethod
     def init_db() -> None:
-        with _get_connection(TEST_LOGS_DB) as conn:
-            conn.executescript("""
+        with _get_init_connection(TEST_LOGS_DB) as conn:
+            conn.executescript(f"""
                 CREATE TABLE IF NOT EXISTS test_runs (
                     test_run_id TEXT PRIMARY KEY,
                     created_at  TEXT
@@ -421,6 +652,7 @@ class TestLogs:
                 );
                 CREATE INDEX IF NOT EXISTS idx_test_logs_test_run_id
                     ON test_logs(test_run_id);
+                PRAGMA user_version = {LOG_VER};
             """)
 
     @staticmethod
@@ -485,6 +717,7 @@ class TestLogs:
                     for e in entries
                 ],
             )
+            _enforce_size_cap(conn, "test_logs")
 
     @staticmethod
     def fetch_chunk(
@@ -533,11 +766,111 @@ class TestLogs:
 
 
 # agent_logs.db -> agent_events table helper
+class AgentSessions:
+    @staticmethod
+    def init_db() -> None:
+        with _get_init_connection(AGENT_LOGS_DB) as conn:
+            conn.executescript(f"""
+                CREATE TABLE IF NOT EXISTS agent_sessions_v2 (
+                    session_id      TEXT PRIMARY KEY,
+                    project_root    TEXT NOT NULL,
+                    model           TEXT NOT NULL DEFAULT 'claude-opus-4-7',
+                    provider_state  TEXT NOT NULL DEFAULT '{{}}',
+                    messages        TEXT NOT NULL DEFAULT '[]',
+                    checklist       TEXT NOT NULL DEFAULT '[]',
+                    active_skills   TEXT NOT NULL DEFAULT '[]',
+                    created_at      REAL NOT NULL,
+                    updated_at      REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_sessions_v2_project
+                    ON agent_sessions_v2(project_root, updated_at DESC);
+                PRAGMA user_version = {LOG_VER};
+            """)
+
+    @staticmethod
+    def upsert_many(rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
+        with _get_connection(AGENT_LOGS_DB) as conn:
+            conn.executemany(
+                """
+                INSERT INTO agent_sessions_v2
+                    (session_id, project_root, provider_state, messages,
+                     checklist, active_skills, created_at, updated_at, model)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    project_root = excluded.project_root,
+                    provider_state = excluded.provider_state,
+                    messages = excluded.messages,
+                    checklist = excluded.checklist,
+                    active_skills = excluded.active_skills,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    model = excluded.model
+                """,
+                [
+                    (
+                        row["session_id"],
+                        row["project_root"],
+                        json.dumps(row.get("provider_state", {}), ensure_ascii=False),
+                        json.dumps(row.get("messages", []), ensure_ascii=False),
+                        json.dumps(row.get("checklist", []), ensure_ascii=False),
+                        json.dumps(row.get("active_skills", []), ensure_ascii=False),
+                        float(row.get("created_at", 0.0) or 0.0),
+                        float(row.get("updated_at", 0.0) or 0.0),
+                        str(row.get("model") or "claude-opus-4-7"),
+                    )
+                    for row in rows
+                ],
+            )
+
+    @staticmethod
+    def load_all(*, project_root: str | None = None) -> list[dict[str, Any]]:
+        if not AGENT_LOGS_DB.exists():
+            return []
+        with _get_connection(AGENT_LOGS_DB) as conn:
+            conn.row_factory = sqlite3.Row
+            if project_root is not None:
+                rows = conn.execute(
+                    "SELECT * FROM agent_sessions_v2"
+                    " WHERE project_root = ?"
+                    " ORDER BY updated_at DESC",
+                    (project_root,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM agent_sessions_v2 ORDER BY updated_at DESC"
+                ).fetchall()
+
+        def _decode(raw: str | None, fallback: Any) -> Any:
+            if not raw:
+                return fallback
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return fallback
+
+        return [
+            {
+                "session_id": row["session_id"],
+                "project_root": row["project_root"],
+                "provider_state": _decode(row["provider_state"], {}),
+                "messages": _decode(row["messages"], []),
+                "checklist": _decode(row["checklist"], []),
+                "active_skills": _decode(row["active_skills"], []),
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "model": row["model"],
+            }
+            for row in rows
+        ]
+
+
 class AgentLogs:
     @staticmethod
     def init_db() -> None:
-        with _get_connection(AGENT_LOGS_DB) as conn:
-            conn.executescript("""
+        with _get_init_connection(AGENT_LOGS_DB) as conn:
+            conn.executescript(f"""
                 CREATE TABLE IF NOT EXISTS agent_events (
                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id      TEXT NOT NULL,
@@ -570,6 +903,7 @@ class AgentLogs:
                     ON agent_events(session_id, id);
                 CREATE INDEX IF NOT EXISTS idx_agent_events_run
                     ON agent_events(run_id, id);
+                PRAGMA user_version = {LOG_VER};
             """)
             conn.row_factory = sqlite3.Row
             existing_columns = {
@@ -704,6 +1038,7 @@ class AgentLogs:
                     for e in entries
                 ],
             )
+            _enforce_size_cap(conn, "agent_events")
 
     @staticmethod
     def fetch_chunk(
@@ -749,416 +1084,3 @@ class AgentLogs:
                 last_id = row["id"]
                 results.append(AgentLogs._from_row(row))
             return results, last_id
-
-
-# agent_logs.db -> tracked_messages + tracked_checklist_items
-class MessageLog:
-    @staticmethod
-    def init_db() -> None:
-        with _get_connection(AGENT_LOGS_DB) as conn:
-            conn.executescript("""
-                CREATE TABLE IF NOT EXISTS tracked_messages (
-                    message_id    TEXT PRIMARY KEY,
-                    session_id    TEXT NOT NULL,
-                    project_root  TEXT NOT NULL,
-                    role          TEXT NOT NULL,
-                    content       TEXT NOT NULL,
-                    status        TEXT NOT NULL,
-                    justification TEXT,
-                    created_at    TEXT NOT NULL,
-                    updated_at    TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_tracked_messages_session_status
-                    ON tracked_messages(session_id, status);
-                CREATE INDEX IF NOT EXISTS idx_tracked_messages_project_session
-                    ON tracked_messages(project_root, session_id);
-                CREATE INDEX IF NOT EXISTS idx_tracked_messages_status
-                    ON tracked_messages(status);
-
-                CREATE TABLE IF NOT EXISTS tracked_checklist_items (
-                    item_id        TEXT NOT NULL,
-                    session_id     TEXT NOT NULL,
-                    message_id     TEXT,
-                    description    TEXT NOT NULL,
-                    criteria       TEXT NOT NULL,
-                    status         TEXT NOT NULL,
-                    requirement_id TEXT,
-                    source         TEXT,
-                    justification  TEXT,
-                    created_at     TEXT NOT NULL,
-                    updated_at     TEXT NOT NULL,
-                    PRIMARY KEY (session_id, item_id)
-                );
-                CREATE INDEX IF NOT EXISTS idx_tracked_checklist_items_message
-                    ON tracked_checklist_items(message_id);
-            """)
-
-    @staticmethod
-    def register_message(msg: TrackedMessage) -> None:
-        try:
-            with _get_connection(AGENT_LOGS_DB) as conn:
-                conn.execute(
-                    """
-                    INSERT INTO tracked_messages
-                        (message_id, session_id, project_root, role,
-                         content, status, justification, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        msg.message_id,
-                        msg.session_id,
-                        msg.project_root,
-                        msg.role,
-                        msg.content,
-                        msg.status,
-                        msg.justification,
-                        msg.created_at,
-                        msg.updated_at,
-                    ),
-                )
-        except Exception:
-            logger.exception("Failed to register tracked message %s", msg.message_id)
-
-    @staticmethod
-    def update_message_status(
-        message_id: str,
-        status: str,
-        justification: str | None = None,
-    ) -> None:
-        from datetime import datetime, timezone
-
-        now = datetime.now(timezone.utc).isoformat()
-        try:
-            with _get_connection(AGENT_LOGS_DB) as conn:
-                conn.execute(
-                    """
-                    UPDATE tracked_messages
-                    SET status = ?, justification = COALESCE(?, justification),
-                        updated_at = ?
-                    WHERE message_id = ?
-                    """,
-                    (status, justification, now, message_id),
-                )
-        except Exception:
-            logger.exception(
-                "Failed to update tracked message %s to %s", message_id, status
-            )
-
-    @staticmethod
-    def get_message(message_id: str) -> TrackedMessage | None:
-        from atopile.server.agent.message_log import TrackedMessage
-
-        try:
-            with _get_connection(AGENT_LOGS_DB) as conn:
-                conn.row_factory = sqlite3.Row
-                row = conn.execute(
-                    "SELECT * FROM tracked_messages WHERE message_id = ?",
-                    (message_id,),
-                ).fetchone()
-                if row is None:
-                    return None
-                return TrackedMessage(
-                    message_id=row["message_id"],
-                    session_id=row["session_id"],
-                    project_root=row["project_root"],
-                    role=row["role"],
-                    content=row["content"],
-                    status=row["status"],
-                    justification=row["justification"],
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"],
-                )
-        except Exception:
-            logger.exception("Failed to get tracked message %s", message_id)
-            return None
-
-    @staticmethod
-    def get_pending_messages(session_id: str) -> list[TrackedMessage]:
-        from atopile.server.agent.message_log import MSG_PENDING, TrackedMessage
-
-        try:
-            with _get_connection(AGENT_LOGS_DB) as conn:
-                conn.row_factory = sqlite3.Row
-                rows = conn.execute(
-                    "SELECT * FROM tracked_messages"
-                    " WHERE session_id = ? AND status = ?"
-                    " ORDER BY created_at ASC",
-                    (session_id, MSG_PENDING),
-                ).fetchall()
-                return [
-                    TrackedMessage(
-                        message_id=r["message_id"],
-                        session_id=r["session_id"],
-                        project_root=r["project_root"],
-                        role=r["role"],
-                        content=r["content"],
-                        status=r["status"],
-                        justification=r["justification"],
-                        created_at=r["created_at"],
-                        updated_at=r["updated_at"],
-                    )
-                    for r in rows
-                ]
-        except Exception:
-            logger.exception(
-                "Failed to get pending messages for session %s", session_id
-            )
-            return []
-
-    @staticmethod
-    def save_checklist_item(item: TrackedChecklistItem) -> None:
-        try:
-            with _get_connection(AGENT_LOGS_DB) as conn:
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO tracked_checklist_items
-                        (item_id, session_id, message_id, description,
-                         criteria, status, requirement_id, source,
-                         justification, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        item.item_id,
-                        item.session_id,
-                        item.message_id,
-                        item.description,
-                        item.criteria,
-                        item.status,
-                        item.requirement_id,
-                        item.source,
-                        item.justification,
-                        item.created_at,
-                        item.updated_at,
-                    ),
-                )
-        except Exception:
-            logger.exception(
-                "Failed to save tracked checklist item %s/%s",
-                item.session_id,
-                item.item_id,
-            )
-
-    @staticmethod
-    def update_checklist_item(
-        session_id: str,
-        item_id: str,
-        status: str,
-        justification: str | None = None,
-    ) -> None:
-        from datetime import datetime, timezone
-
-        now = datetime.now(timezone.utc).isoformat()
-        try:
-            with _get_connection(AGENT_LOGS_DB) as conn:
-                conn.execute(
-                    """
-                    UPDATE tracked_checklist_items
-                    SET status = ?, justification = COALESCE(?, justification),
-                        updated_at = ?
-                    WHERE session_id = ? AND item_id = ?
-                    """,
-                    (status, justification, now, session_id, item_id),
-                )
-        except Exception:
-            logger.exception(
-                "Failed to update tracked checklist item %s/%s", session_id, item_id
-            )
-
-    @staticmethod
-    def check_and_complete_messages(session_id: str) -> list[str]:
-        """Auto-transition active messages when linked items are terminal."""
-        from atopile.server.agent.message_log import (
-            _TERMINAL_ITEM_STATUSES,
-            MSG_ACTIVE,
-            MSG_DONE,
-        )
-
-        completed_ids: list[str] = []
-        try:
-            with _get_connection(AGENT_LOGS_DB) as conn:
-                conn.row_factory = sqlite3.Row
-                # Get all active messages for this session
-                active_msgs = conn.execute(
-                    "SELECT message_id FROM tracked_messages"
-                    " WHERE session_id = ? AND status = ?",
-                    (session_id, MSG_ACTIVE),
-                ).fetchall()
-
-                from datetime import datetime, timezone
-
-                now = datetime.now(timezone.utc).isoformat()
-
-                for msg_row in active_msgs:
-                    mid = msg_row["message_id"]
-                    # Get all linked checklist items
-                    items = conn.execute(
-                        "SELECT status FROM tracked_checklist_items"
-                        " WHERE message_id = ?",
-                        (mid,),
-                    ).fetchall()
-                    if not items:
-                        continue
-                    # Check if all items are terminal
-                    if all(r["status"] in _TERMINAL_ITEM_STATUSES for r in items):
-                        conn.execute(
-                            """
-                            UPDATE tracked_messages
-                            SET status = ?, justification = ?, updated_at = ?
-                            WHERE message_id = ?
-                            """,
-                            (
-                                MSG_DONE,
-                                "All linked checklist items completed",
-                                now,
-                                mid,
-                            ),
-                        )
-                        completed_ids.append(mid)
-        except Exception:
-            logger.exception(
-                "Failed to check/complete messages for session %s", session_id
-            )
-        return completed_ids
-
-    @staticmethod
-    def query(
-        *,
-        session_id: str | None = None,
-        project_root: str | None = None,
-        status: str | None = None,
-        search: str | None = None,
-        include_items: bool = False,
-        limit: int = 50,
-    ) -> dict[str, Any]:
-        """Flexible query for tracked messages, optionally cross-thread."""
-        results: dict[str, Any] = {"messages": [], "total": 0}
-        try:
-            with _get_connection(AGENT_LOGS_DB) as conn:
-                conn.row_factory = sqlite3.Row
-
-                where: list[str] = []
-                params: list[Any] = []
-
-                if session_id:
-                    where.append("session_id = ?")
-                    params.append(session_id)
-                if project_root:
-                    where.append("project_root = ?")
-                    params.append(project_root)
-                if status:
-                    where.append("status = ?")
-                    params.append(status)
-                if search:
-                    where.append("content LIKE ?")
-                    params.append(f"%{search}%")
-
-                where_clause = " WHERE " + " AND ".join(where) if where else ""
-                params.append(min(limit, 200))
-
-                rows = conn.execute(
-                    f"SELECT * FROM tracked_messages{where_clause}"
-                    " ORDER BY created_at DESC LIMIT ?",
-                    params,
-                ).fetchall()
-
-                messages = []
-                for r in rows:
-                    msg_dict: dict[str, Any] = {
-                        "message_id": r["message_id"],
-                        "session_id": r["session_id"],
-                        "project_root": r["project_root"],
-                        "role": r["role"],
-                        "content": r["content"][:500],
-                        "status": r["status"],
-                        "justification": r["justification"],
-                        "created_at": r["created_at"],
-                        "updated_at": r["updated_at"],
-                    }
-                    if include_items:
-                        item_rows = conn.execute(
-                            "SELECT * FROM tracked_checklist_items"
-                            " WHERE message_id = ?",
-                            (r["message_id"],),
-                        ).fetchall()
-                        msg_dict["items"] = [
-                            {
-                                "item_id": ir["item_id"],
-                                "description": ir["description"],
-                                "status": ir["status"],
-                                "justification": ir["justification"],
-                            }
-                            for ir in item_rows
-                        ]
-                    messages.append(msg_dict)
-
-                results["messages"] = messages
-                results["total"] = len(messages)
-        except Exception:
-            logger.exception("Failed to query tracked messages")
-        return results
-
-
-class Tests:
-    def test_paths(self) -> None:
-        print(BUILD_HISTORY_DB)
-        print(TEST_LOGS_DB)
-        print(BUILD_LOGS_DB)
-
-    def test_build_history(self) -> None:
-        BuildHistory.init_db()
-        BuildHistory.set(
-            Build(
-                name="target",
-                display_name="project_root:target",
-                build_id="123",
-                project_root="project_root",
-                target="target",
-                entry="entry",
-                status=BuildStatus.SUCCESS,
-            )
-        )
-
-    def test_logs(self) -> None:
-        import uuid
-
-        build_id = f"test-{uuid.uuid4()}"
-        Logs.init_db()
-        Logs.append_chunk(
-            [
-                LogRow(
-                    build_id=build_id,
-                    timestamp="2025-01-01T00:00:00",
-                    stage="compile",
-                    level="INFO",
-                    message="hello",
-                    logger_name="test",
-                )
-            ]
-        )
-        rows, last_id = Logs.fetch_chunk(build_id)
-        assert len(rows) == 1
-        assert rows[0]["message"] == "hello"
-        assert last_id > 0
-
-    def test_test_logs(self) -> None:
-        import uuid
-
-        test_run_id = f"test-run-{uuid.uuid4()}"
-        TestLogs.init_db()
-        TestLogs.register_run(test_run_id)
-        TestLogs.append_chunk(
-            [
-                TestLogRow(
-                    test_run_id=test_run_id,
-                    timestamp="2025-01-01T00:00:00",
-                    test_name="test_foo",
-                    level="INFO",
-                    message="passed",
-                    logger_name="test",
-                )
-            ]
-        )
-        rows, last_id = TestLogs.fetch_chunk(test_run_id)
-        assert len(rows) == 1
-        assert rows[0]["message"] == "passed"
-        assert last_id > 0

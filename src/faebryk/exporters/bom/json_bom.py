@@ -56,6 +56,7 @@ class BOMComponent:
     isBasic: bool | None  # JLCPCB basic part
     isPreferred: bool | None  # JLCPCB preferred part
     source: str  # How the part was selected: "picked", "specified", "manual"
+    datasheet: str | None = None  # Datasheet URL
     parameters: list[BOMParameter] = field(default_factory=list)
     usages: list[BOMUsage] = field(default_factory=list)
 
@@ -310,11 +311,11 @@ def make_json_bom(
                 is_basic = picked_part.info.basic
                 is_preferred = picked_part.info.preferred
 
-            # Also try to get description from has_datasheet trait
-            if description is None:
-                if module.try_get_trait(F.has_datasheet):
-                    # Description comes from picked part info
-                    pass
+            # Get datasheet URL
+            datasheet_url: str | None = None
+            if datasheet_trait := module.try_get_trait(F.has_datasheet):
+                if datasheet := datasheet_trait.get_datasheet():
+                    datasheet_url = datasheet
 
             # Get package/footprint
             package = _get_footprint_name(part_trait)
@@ -354,6 +355,7 @@ def make_json_bom(
                     isBasic=is_basic,
                     isPreferred=is_preferred,
                     source=source,
+                    datasheet=datasheet_url,
                     parameters=parameters,
                     usages=[usage],
                 )

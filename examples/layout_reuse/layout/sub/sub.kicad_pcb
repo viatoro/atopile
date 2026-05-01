@@ -97,15 +97,15 @@
 			(usegerberattributes yes)
 			(usegerberadvancedattributes yes)
 			(creategerberjobfile yes)
-			(dashed_line_dash_ratio 12.000000)
-			(dashed_line_gap_ratio 3.000000)
+			(dashed_line_dash_ratio 12)
+			(dashed_line_gap_ratio 3)
 			(svgprecision 4)
 			(plotframeref no)
 			(mode 1)
 			(useauxorigin no)
 			(hpglpennumber 1)
 			(hpglpenspeed 20)
-			(hpglpendiameter 15.000000)
+			(hpglpendiameter 15)
 			(pdf_front_fp_property_popups yes)
 			(pdf_back_fp_property_popups yes)
 			(pdf_metadata yes)
@@ -149,7 +149,7 @@
 				)
 			)
 		)
-		(property "Value" "1kΩ"
+		(property "Value" "1kΩ ±1%"
 			(at 0 4 90)
 			(layer "F.Fab")
 			(uuid "ce777613-11c4-4c47-9b43-896b911eabe5")
@@ -184,7 +184,7 @@
 				)
 			)
 		)
-		(property "resistance" "1±1.0%kΩ"
+		(property "resistance" "1kΩ ±1%"
 			(at 0 0 90)
 			(layer "User.9")
 			(hide yes)
@@ -337,6 +337,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "6e3e6214-79bb-482e-abb4-342020901957")
 		)
 		(fp_line
@@ -347,6 +349,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "0fdab0a5-4e2b-4b10-90d4-8a5ed14cdae4")
 		)
 		(fp_line
@@ -357,6 +361,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "e5a9ca0e-933f-49c1-8914-8bb07ddf7994")
 		)
 		(fp_line
@@ -367,6 +373,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "84af9e99-43c3-4987-975b-e6785c6dd3d6")
 		)
 		(fp_line
@@ -377,6 +385,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "ea842a0f-c30f-40cd-a13b-2e7780b157ce")
 		)
 		(fp_line
@@ -387,6 +397,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "d8a73aa8-bf44-46a0-9f54-358958dabd42")
 		)
 		(fp_circle
@@ -396,32 +408,21 @@
 				(width 0.06)
 				(type solid)
 			)
-			(fill no)
 			(layer "F.Fab")
+			(locked no)
 			(uuid "9518436b-a516-4d11-baec-4462081e0350")
-		)
-		(fp_text user "${REFERENCE}"
-			(at 0 0 90)
-			(layer "F.Fab")
-			(uuid "814d97e9-a4fd-4e8b-ac22-3efa50b8f942")
-			(effects
-				(font
-					(size 1 1)
-					(thickness 0.15)
-				)
-			)
 		)
 		(pad "1" smd rect
 			(at -0.43 0 90)
 			(size 0.57 0.54)
-			(layers "F.Cu" "F.Mask" "F.Paste")
+			(layers "F.Cu" "F.Paste" "F.Mask")
 			(net 2 "unnamed[0]-2")
 			(uuid "904f4ab7-1f85-4f1b-978d-85fa89583fcf")
 		)
 		(pad "2" smd rect
 			(at 0.43 0 90)
 			(size 0.57 0.54)
-			(layers "F.Cu" "F.Mask" "F.Paste")
+			(layers "F.Cu" "F.Paste" "F.Mask")
 			(net 1 "unnamed[1]")
 			(uuid "76ed3477-d7f6-4bc3-9aae-3b906fa945f7")
 		)
@@ -453,7 +454,7 @@
 				)
 			)
 		)
-		(property "Value" "1kΩ"
+		(property "Value" "1kΩ ±1%"
 			(at 0 4 90)
 			(layer "F.Fab")
 			(uuid "cf9ab350-268e-44d6-b94d-e0010172de4d")
@@ -488,7 +489,7 @@
 				)
 			)
 		)
-		(property "resistance" "1±1.0%kΩ"
+		(property "resistance" "1kΩ ±1%"
 			(at 0 0 90)
 			(layer "User.9")
 			(hide yes)
@@ -641,6 +642,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "60c4f55e-de2d-4a9c-a7ed-dca0eb78bb21")
 		)
 		(fp_line
@@ -651,6 +654,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "531dc0e5-7742-47db-812d-74f9abbc36ed")
 		)
 		(fp_line
@@ -661,6 +666,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "ed3a4a34-1cc6-4d1d-8bab-90c2a27bad4b")
 		)
 		(fp_line
@@ -671,6 +678,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "20dee6a8-ea5f-4b35-8113-61540589247e")
 		)
 		(fp_line
@@ -681,6 +690,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "c001cd9f-4dbf-4550-aa77-89c88f031532")
 		)
 		(fp_line
@@ -691,6 +702,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "e70162d6-0fbe-4fd9-8794-b95368712e58")
 		)
 		(fp_circle
@@ -700,32 +713,21 @@
 				(width 0.06)
 				(type solid)
 			)
-			(fill no)
 			(layer "F.Fab")
+			(locked no)
 			(uuid "b1667514-80c0-4814-b6a5-758eedc2bb74")
-		)
-		(fp_text user "${REFERENCE}"
-			(at 0 0 90)
-			(layer "F.Fab")
-			(uuid "0e6f4976-c48c-4b65-b734-9fede4ab5d5c")
-			(effects
-				(font
-					(size 1 1)
-					(thickness 0.15)
-				)
-			)
 		)
 		(pad "1" smd rect
 			(at -0.43 0 90)
 			(size 0.57 0.54)
-			(layers "F.Cu" "F.Mask" "F.Paste")
+			(layers "F.Cu" "F.Paste" "F.Mask")
 			(net 3 "unnamed[0]-1")
 			(uuid "739e9e77-69dd-4259-80b4-f037141878ad")
 		)
 		(pad "2" smd rect
 			(at 0.43 0 90)
 			(size 0.57 0.54)
-			(layers "F.Cu" "F.Mask" "F.Paste")
+			(layers "F.Cu" "F.Paste" "F.Mask")
 			(net 2 "unnamed[0]-2")
 			(uuid "088a50e6-489d-4d61-aa26-9ef349b12397")
 		)
@@ -757,7 +759,7 @@
 				)
 			)
 		)
-		(property "Value" "1kΩ"
+		(property "Value" "1kΩ ±1%"
 			(at 0 4 90)
 			(layer "F.Fab")
 			(uuid "f26799ab-8d58-47a6-8669-f6c84d23b86e")
@@ -792,7 +794,7 @@
 				)
 			)
 		)
-		(property "resistance" "1±1.0%kΩ"
+		(property "resistance" "1kΩ ±1%"
 			(at 0 0 90)
 			(layer "User.9")
 			(hide yes)
@@ -945,6 +947,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "be4e919b-f593-4a76-ad5a-59c5984c6fe8")
 		)
 		(fp_line
@@ -955,6 +959,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "b18d322c-0cab-42e5-bc98-119cc087b61a")
 		)
 		(fp_line
@@ -965,6 +971,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "cb0417dd-c403-4491-9be8-f29faf5318ed")
 		)
 		(fp_line
@@ -975,6 +983,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "9a0c591f-880e-47e3-9ac0-4847f18366d2")
 		)
 		(fp_line
@@ -985,6 +995,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "469caf36-45b8-42a0-804b-fe1fa1b84b6f")
 		)
 		(fp_line
@@ -995,6 +1007,8 @@
 				(type solid)
 			)
 			(layer "F.SilkS")
+			(layers "F.SilkS")
+			(locked no)
 			(uuid "4c07012b-f99b-4c15-823f-d5a561cca9ca")
 		)
 		(fp_circle
@@ -1004,32 +1018,21 @@
 				(width 0.06)
 				(type solid)
 			)
-			(fill no)
 			(layer "F.Fab")
+			(locked no)
 			(uuid "1c86ee46-18d2-4ac8-9cf6-7c4bdfeaf13c")
-		)
-		(fp_text user "${REFERENCE}"
-			(at 0 0 90)
-			(layer "F.Fab")
-			(uuid "98666faf-1c24-496f-ac83-f606848d7146")
-			(effects
-				(font
-					(size 1 1)
-					(thickness 0.15)
-				)
-			)
 		)
 		(pad "1" smd rect
 			(at -0.43 0 90)
 			(size 0.57 0.54)
-			(layers "F.Cu" "F.Mask" "F.Paste")
+			(layers "F.Cu" "F.Paste" "F.Mask")
 			(net 4 "unnamed[0]")
 			(uuid "a9fd0175-7bfe-411a-8e94-84ede0d877f1")
 		)
 		(pad "2" smd rect
 			(at 0.43 0 90)
 			(size 0.57 0.54)
-			(layers "F.Cu" "F.Mask" "F.Paste")
+			(layers "F.Cu" "F.Paste" "F.Mask")
 			(net 3 "unnamed[0]-1")
 			(uuid "fea15544-aa50-432a-a666-0a64556841de")
 		)

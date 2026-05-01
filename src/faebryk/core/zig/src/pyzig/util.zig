@@ -26,13 +26,10 @@ pub fn printStruct(value: anytype, buf: []u8) ![:0]u8 {
     comptime if (@typeInfo(T) != .@"struct") @compileError("printStruct expects a struct");
 
     if (buf.len == 0) return error.BufferTooSmall;
-    var stream = std.io.fixedBufferStream(buf[0 .. buf.len - 1]);
-    {
-        const writer = stream.writer();
-        try printStructInline(writer, value, 0);
-        try writer.writeByte('\n');
-    }
-    const written = stream.pos;
+    var writer = std.Io.Writer.fixed(buf[0 .. buf.len - 1]);
+    try printStructInline(&writer, value, 0);
+    try writer.writeByte('\n');
+    const written = writer.end;
     buf[written] = 0;
     return buf[0..written :0];
 }
@@ -152,7 +149,7 @@ fn printValue(writer: anytype, value: anytype, indent: usize) anyerror!void {
 }
 
 fn writeIndent(writer: anytype, indent: usize) anyerror!void {
-    try writer.writeByteNTimes(' ', indent);
+    try writer.splatByteAll(' ', indent);
 }
 
 fn isAllocatorType(comptime T: type) bool {
@@ -176,7 +173,6 @@ fn isHashMapType(comptime T: type) bool {
 
 fn printString(writer: anytype, slice: []const u8) anyerror!void {
     try writer.writeByte('"');
-    // Write escaped string manually for Zig 0.15 compatibility
     for (slice) |c| {
         switch (c) {
             '\n' => try writer.writeAll("\\n"),

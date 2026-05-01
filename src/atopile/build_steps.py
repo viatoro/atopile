@@ -29,13 +29,22 @@ from atopile.errors import (
 )
 from atopile.logging import AtoLogger, get_logger
 from atopile.logging_utils import get_status_style, print_bar
-from faebryk.core.solver.solver import Solver
+from atopile.model.builds import get_build_output_dir_for_config
+from faebryk.core.solver import Solver
 from faebryk.exporters.bom.jlcpcb import write_bom
 from faebryk.exporters.bom.json_bom import write_json_bom
-from faebryk.exporters.documentation.datasheets import export_datasheets
-
-# from faebryk.exporters.documentation.i2c import export_i2c_tree
-from faebryk.exporters.parameters.parameters_to_file import export_parameters_to_file
+from faebryk.exporters.documentation.data_interface_layout import (
+    export_data_interface_tree,
+)
+from faebryk.exporters.documentation.datasheets import (
+    finalize_datasheet_downloads,
+    start_datasheet_downloads,
+)
+from faebryk.exporters.documentation.power_tree import (
+    export_power_tree,
+    export_power_tree_json,
+)
+from faebryk.exporters.parameters.json_parameters import write_variables_to_file
 from faebryk.exporters.pcb.kicad.artifacts import (
     KicadCliExportError,
     export_3d_board_render,
@@ -48,12 +57,14 @@ from faebryk.exporters.pcb.kicad.artifacts import (
     export_svg,
     githash_layout,
 )
+from faebryk.exporters.pcb.kicad.transformer import PCB_Transformer
 from faebryk.exporters.pcb.layout.layout_sync import LayoutSync
 from faebryk.exporters.pcb.pick_and_place.jlcpcb import (
     convert_kicad_pick_and_place_to_jlcpcb,
 )
+from faebryk.exporters.pcb.rectangular_board_shape import apply_board_outlines
+from faebryk.exporters.pcb.stackup import export_stackup_json
 from faebryk.exporters.pcb.testpoints.testpoints import export_testpoints
-from faebryk.exporters.power_tree.power_tree import export_power_tree
 from faebryk.libs.app.checks import check_design
 from faebryk.libs.app.designators import (
     attach_random_designators,
@@ -83,12 +94,9 @@ def _run_stage_ticker(
     *,
     build_id: str,
     build_name: str,
-    display_name: str,
     project_root: str,
-    target: str,
     stage_name: str,
     stage_id: str,
-    stage_display_name: str | None,
     build_started_at: float,
     stage_started_at: float,
     stop_event,
@@ -96,7 +104,7 @@ def _run_stage_ticker(
 ) -> None:
     import time
 
-    from atopile.dataclasses import Build, BuildStatus, StageStatus
+    from atopile.data_models import BuildStage, BuildStatus, StageStatus
     from atopile.model.sqlite import BuildHistory
 
     while not stop_event.wait(interval_s):
@@ -107,49 +115,48 @@ def _run_stage_ticker(
         build_info = BuildHistory.get(build_id)
         current_stages = build_info.stages if build_info else []
         updated = False
-        new_stages: list[dict] = []
+        new_stages: list[BuildStage] = []
 
         for stage in current_stages:
-            stage_key = stage.get("stageId") or stage.get("stage_id")
-            if stage_key == stage_id:
+            if stage.stage_id == stage_id:
                 updated = True
                 new_stages.append(
-                    {
-                        **stage,
-                        "name": stage_name,
-                        "stageId": stage_id,
-                        "displayName": stage_display_name,
-                        "status": StageStatus.RUNNING.value,
-                        "elapsedSeconds": elapsed_stage,
-                    }
+                    stage.model_copy(
+                        update={
+                            "name": stage_name,
+                            "stage_id": stage_id,
+                            "status": StageStatus.RUNNING,
+                            "elapsed_seconds": elapsed_stage,
+                        }
+                    )
                 )
             else:
                 new_stages.append(stage)
 
         if not updated:
             new_stages.append(
-                {
-                    "name": stage_name,
-                    "stageId": stage_id,
-                    "displayName": stage_display_name,
-                    "status": StageStatus.RUNNING.value,
-                    "elapsedSeconds": elapsed_stage,
-                }
+                BuildStage(
+                    name=stage_name,
+                    stage_id=stage_id,
+                    status=StageStatus.RUNNING,
+                    elapsed_seconds=elapsed_stage,
+                )
             )
 
-        BuildHistory.set(
-            Build(
-                build_id=build_id,
-                name=build_name,
-                display_name=display_name,
-                project_root=project_root,
-                target=target,
-                status=BuildStatus.BUILDING,
-                started_at=build_started_at,
-                elapsed_seconds=elapsed_build,
-                stages=new_stages,
+        existing = BuildHistory.get(build_id)
+        if existing is not None:
+            BuildHistory.set(
+                existing.model_copy(
+                    update={
+                        "name": build_name,
+                        "project_root": project_root,
+                        "status": BuildStatus.BUILDING,
+                        "started_at": build_started_at,
+                        "elapsed_seconds": elapsed_build,
+                        "stages": new_stages,
+                    }
+                )
             )
-        )
 
 
 class Tags(StrEnum):
@@ -184,10 +191,10 @@ class MusterTarget:
             self.success = True
             return
 
-        import multiprocessing
+        import threading
         import time
 
-        from atopile.dataclasses import Build, BuildStage, BuildStatus, StageStatus
+        from atopile.data_models import BuildStage, BuildStatus, StageStatus
         from atopile.model.sqlite import BuildHistory
 
         ctx.stage = self.name
@@ -207,35 +214,31 @@ class MusterTarget:
             existing = BuildHistory.get(ctx.build_id)
             if existing and existing.started_at:
                 build_started_at = existing.started_at
-            BuildHistory.set(
-                Build(
-                    build_id=ctx.build_id,
-                    name=config.build.name,
-                    display_name=config.build.name,
-                    project_root=str(config.project.paths.root),
-                    target=config.build.name,
-                    status=BuildStatus.BUILDING,
-                    started_at=build_started_at,
-                    elapsed_seconds=time.time() - build_started_at,
-                    stages=[s.model_dump(by_alias=True) for s in ctx.completed_stages]
-                    + [running_stage.model_dump(by_alias=True)],
+            if existing is not None:
+                BuildHistory.set(
+                    existing.model_copy(
+                        update={
+                            "name": config.build.name,
+                            "project_root": str(config.project.paths.root),
+                            "status": BuildStatus.BUILDING,
+                            "started_at": build_started_at,
+                            "elapsed_seconds": time.time() - build_started_at,
+                            "stages": [*ctx.completed_stages, running_stage],
+                        }
+                    )
                 )
-            )
 
-        stop_event = multiprocessing.Event()
-        ticker: multiprocessing.Process | None = None
+        stop_event = threading.Event()
+        ticker: threading.Thread | None = None
         if ctx.build_id:
-            ticker = multiprocessing.Process(
+            ticker = threading.Thread(
                 target=_run_stage_ticker,
                 kwargs={
                     "build_id": ctx.build_id,
                     "build_name": config.build.name,
-                    "display_name": config.build.name,
                     "project_root": str(config.project.paths.root),
-                    "target": config.build.name,
                     "stage_name": self.description or self.name,
                     "stage_id": self.name,
-                    "stage_display_name": None,
                     "build_started_at": build_started_at,
                     "stage_started_at": start,
                     "stop_event": stop_event,
@@ -250,8 +253,8 @@ class MusterTarget:
             succeeded = True
         finally:
             stop_event.set()
-            if ticker and ticker.is_alive():
-                ticker.terminate()
+            if ticker:
+                ticker.join(timeout=1)
             elapsed = round(time.time() - start, 2)
             stage_status = StageStatus.SUCCESS if succeeded else StageStatus.FAILED
             stage_name = self.description or self.name
@@ -274,21 +277,19 @@ class MusterTarget:
                 started_at = (
                     existing.started_at if existing and existing.started_at else start
                 )
-                BuildHistory.set(
-                    Build(
-                        build_id=ctx.build_id,
-                        name=config.build.name,
-                        display_name=config.build.name,
-                        project_root=str(config.project.paths.root),
-                        target=config.build.name,
-                        status=BuildStatus.BUILDING,
-                        started_at=started_at,
-                        elapsed_seconds=time.time() - started_at,
-                        stages=[
-                            s.model_dump(by_alias=True) for s in ctx.completed_stages
-                        ],
+                if existing is not None:
+                    BuildHistory.set(
+                        existing.model_copy(
+                            update={
+                                "name": config.build.name,
+                                "project_root": str(config.project.paths.root),
+                                "status": BuildStatus.BUILDING,
+                                "started_at": started_at,
+                                "elapsed_seconds": time.time() - started_at,
+                                "stages": ctx.completed_stages,
+                            }
+                        )
                     )
-                )
             self.success = succeeded
 
     @property
@@ -362,8 +363,12 @@ class Muster:
                         )
 
         subgraph = self.dependency_dag.get_subgraph(
-            selector_func=lambda name: name in selected_targets
-            or any(alias in selected_targets for alias in self.targets[name].aliases)
+            selector_func=lambda name: (
+                name in selected_targets
+                or any(
+                    alias in selected_targets for alias in self.targets[name].aliases
+                )
+            )
         )
 
         sorted_names = subgraph.topologically_sorted()
@@ -383,8 +388,17 @@ muster = Muster()
 
 
 @muster.register(
+    "resolve-dependencies",
+    description="Resolving dependencies",
+)
+def resolve_dependencies_step(ctx: BuildStepContext) -> None:
+    buildutil.ensure_project_dependencies()
+
+
+@muster.register(
     "init-build-context",
     description="Initializing build context",
+    dependencies=[resolve_dependencies_step],
 )
 def init_build_context_step(ctx: BuildStepContext) -> None:
     if ctx.build is not None or ctx.app is not None:
@@ -503,6 +517,14 @@ def instantiate_app_step(ctx: BuildStepContext) -> None:
                 ) from e
 
             app = fabll.Node.bind_instance(app_root)
+            app_name_trait = (
+                F.has_name_override.bind_typegraph(tg=build_ctx.tg)
+                .create_instance(g=build_ctx.g)
+                .setup(name=config.build.entry_section)
+            )
+            fabll.Traits.add_instance_to(node=app, trait_instance=app_name_trait)
+            fabll.Traits.create_and_add_instance_to(app, F.is_app_root)
+            app.no_include_parents_in_full_name = True
             F.Parameters.NumericParameter.infer_units_in_tree(app)
             F.Parameters.NumericParameter.validate_predicate_units_in_tree(app)
         case BuildType.PYTHON:
@@ -537,6 +559,26 @@ def instantiate_app_step(ctx: BuildStepContext) -> None:
 def prepare_build(ctx: BuildStepContext) -> None:
     app = ctx.require_app()
     ctx.solver = Solver()
+
+    # Check if build has only a single board (PCB) defined.
+    is_pcb_traits = fabll.Traits.get_implementors(
+        F.PCBManufacturing.is_pcb.bind_typegraph(app.tg), g=app.g
+    )
+
+    if len(is_pcb_traits) > 1:
+        raise UserException(
+            "Build has multiple boards: "
+            f"{
+                ', '.join(
+                    fabll.Traits(is_pcb_trait).get_obj_raw().get_name()
+                    for is_pcb_trait in is_pcb_traits
+                )
+            }, "
+            "currently not supported."
+        )
+    elif len(is_pcb_traits) == 1:
+        _ = is_pcb_traits[0].get_stackup()  # validate stackup
+
     if ctx.pcb is None:
         ctx.pcb = (
             F.PCB.bind_typegraph(app.tg)
@@ -572,6 +614,7 @@ def post_instantiation_graph_check(ctx: BuildStepContext) -> None:
     - Applying default constraints (has_default_constraint)
     - Early graph validation to catch malformed connections
     """
+
     app = ctx.require_app()
     check_design(
         app,
@@ -593,6 +636,7 @@ def post_instantiation_setup(ctx: BuildStepContext) -> None:
     - Connecting deprecated aliases (ElectricPower vcc/gnd)
     - Connecting electric references (has_single_electric_reference)
     """
+
     app = ctx.require_app()
     check_design(
         app,
@@ -617,6 +661,7 @@ def post_instantiation_design_check(ctx: BuildStepContext) -> None:
     - Setting address lines based on solved offset (Addressor)
     - Other verification checks
     """
+
     app = ctx.require_app()
     check_design(
         app,
@@ -631,6 +676,7 @@ def post_instantiation_design_check(ctx: BuildStepContext) -> None:
     dependencies=[post_instantiation_design_check],
 )
 def load_pcb(ctx: BuildStepContext) -> None:
+
     pcb = ctx.require_pcb()
     pcb.run_transformer()
     if config.build.keep_designators:
@@ -652,12 +698,14 @@ def pick_parts(ctx: BuildStepContext) -> None:
             [UserPickError(str(e)) for e in iter_leaf_exceptions(ex)],
         ) from ex
     save_part_info_to_pcb(app)
+    start_datasheet_downloads(app)
 
 
 @muster.register(
     "prepare-nets", description="Preparing nets", dependencies=[pick_parts]
 )
 def prepare_nets(ctx: BuildStepContext) -> None:
+
     app = ctx.require_app()
     pcb = ctx.require_pcb()
     logger.info("Preparing nets")
@@ -691,6 +739,7 @@ def prepare_nets(ctx: BuildStepContext) -> None:
     dependencies=[prepare_nets],
 )
 def post_solve_checks(ctx: BuildStepContext) -> None:
+
     app = ctx.require_app()
     logger.info("Running checks")
     check_design(
@@ -819,18 +868,35 @@ def update_pcb(ctx: BuildStepContext) -> None:
 
     original_pcb = kicad.copy(pcb.pcb_file)
     pcb.transformer.apply_design()
+    apply_board_outlines(pcb.transformer, app)
     pcb.transformer.check_unattached_fps()
 
     # Ensure proper board appearance (matte black soldermask, ENIG copper finish)
     # This will overwrite user settings in the KiCad PCB file!
     ensure_board_appearance(pcb.pcb_file.kicad_pcb)
 
+    # Detect new footprints for setting designator positions
+    new_fps = PCB_Transformer.get_new_footprints(
+        original_pcb.kicad_pcb, pcb.pcb_file.kicad_pcb
+    )
+
+    # Determine whether to standardize designators
+    # None = auto (run on new footprints only)
+    # True = always run, False = never run
+    should_standardize = config.build.standardize_designators is True or (
+        config.build.standardize_designators is None and bool(new_fps)
+    )
+
     # set layout
     if config.build.hide_designators:
         pcb.transformer.hide_all_designators()
+    if should_standardize:
+        # In auto mode, only update new footprints; explicit mode updates all
+        fps = new_fps if config.build.standardize_designators is None else None
+        pcb.transformer.set_designator_positions(footprints=fps)
 
     # Backup layout
-    backup_dir = config.build.paths.output_base.parent / "backups"
+    backup_dir = get_build_output_dir_for_config(config.build) / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
     artifact_name = config.build.paths.output_base.stem
     backup_file = (backup_dir / artifact_name).with_suffix(
@@ -845,6 +911,7 @@ def update_pcb(ctx: BuildStepContext) -> None:
     "post-pcb-checks", description="Running post-pcb checks", dependencies=[update_pcb]
 )
 def post_pcb_checks(ctx: BuildStepContext) -> None:
+
     pcb = ctx.require_pcb()
     _ = fabll.Traits.create_and_add_instance_to(pcb, F.PCB.requires_drc_check)
     try:
@@ -891,53 +958,6 @@ def generate_bom(ctx: BuildStepContext) -> None:
 
 
 @muster.register(
-    name="glb",
-    aliases=["3d-model"],
-    tags={Tags.REQUIRES_KICAD},
-    dependencies=[build_design],
-    produces_artifact=True,
-)
-def generate_glb(ctx: BuildStepContext) -> None:
-    """Generate PCBA 3D model as GLB. Used for 3D preview in extension."""
-    ctx.require_app()
-    with _githash_layout(config.build.paths.layout) as tmp_layout:
-        try:
-            export_glb(
-                tmp_layout,
-                glb_file=config.build.paths.output_base.with_suffix(".pcba.glb"),
-                project_dir=config.build.paths.layout.parent,
-            )
-        except KicadCliExportError as e:
-            raise UserExportError(f"Failed to generate 3D model: {e}") from e
-
-
-@muster.register(
-    name="glb-only",
-    aliases=["3d-model-only"],
-    tags={Tags.REQUIRES_KICAD},
-    dependencies=[],
-    produces_artifact=True,
-)
-def generate_glb_only(ctx: BuildStepContext) -> None:
-    """Generate GLB from existing layout without rebuilding. For fast 3D preview."""
-    layout_path = config.build.paths.layout
-    if not layout_path.exists():
-        raise UserException(
-            f"Layout file not found: {layout_path}\n\n"
-            "Run a full build first to generate the layout."
-        )
-    with _githash_layout(layout_path) as tmp_layout:
-        try:
-            export_glb(
-                tmp_layout,
-                glb_file=config.build.paths.output_base.with_suffix(".pcba.glb"),
-                project_dir=layout_path.parent,
-            )
-        except KicadCliExportError as e:
-            raise UserExportError(f"Failed to generate 3D model: {e}") from e
-
-
-@muster.register(
     name="step",
     tags={Tags.REQUIRES_KICAD},
     dependencies=[build_design],
@@ -958,14 +978,23 @@ def generate_step(ctx: BuildStepContext) -> None:
 
 
 @muster.register(
-    "3d-models",
-    dependencies=[generate_glb, generate_step],
-    virtual=True,
+    name="glb",
+    tags={Tags.REQUIRES_KICAD},
+    dependencies=[build_design],
     produces_artifact=True,
 )
-def generate_3d_models(ctx: BuildStepContext) -> None:
-    """Generate PCBA 3D model as GLB and STEP."""
-    pass
+def generate_glb(ctx: BuildStepContext) -> None:
+    """Generate PCBA 3D model as GLB."""
+    ctx.require_app()
+    with _githash_layout(config.build.paths.layout) as tmp_layout:
+        try:
+            export_glb(
+                tmp_layout,
+                glb_file=config.build.paths.output_base.with_suffix(".pcba.glb"),
+                project_dir=config.build.paths.layout.parent,
+            )
+        except KicadCliExportError as e:
+            raise UserExportError(f"Failed to generate GLB file: {e}") from e
 
 
 @muster.register(
@@ -1012,7 +1041,7 @@ def generate_2d_render(ctx: BuildStepContext) -> None:
 @muster.register(
     "mfg-data",
     tags={Tags.REQUIRES_KICAD},
-    dependencies=[generate_glb, generate_step, post_pcb_checks],
+    dependencies=[generate_step, post_pcb_checks],
     produces_artifact=True,
 )
 def generate_manufacturing_data(ctx: BuildStepContext) -> None:
@@ -1120,12 +1149,26 @@ def generate_variable_report(ctx: BuildStepContext) -> None:
     """Generate a report of all the variable values in the design."""
     app = ctx.require_app()
     solver = ctx.require_solver()
-    export_parameters_to_file(
+    write_variables_to_file(
         app,
         solver,
-        config.build.paths.output_base.with_suffix(".variables.json"),
+        config.build.paths.output_base.with_suffix(".variables.ato.json"),
         build_id=ctx.build_id,
     )
+
+
+@muster.register(
+    "pinout",
+    dependencies=[build_design],
+    produces_artifact=True,
+)
+def generate_pinout(ctx: BuildStepContext) -> None:
+    """Generate per-component JSON pinout artifacts for board components."""
+    from faebryk.exporters.pinout.pinout import export_pinout_json
+
+    app = ctx.require_app()
+    pinout_dir = get_build_output_dir_for_config(config.build) / "pinout"
+    export_pinout_json(app, pinout_dir)
 
 
 @muster.register(
@@ -1137,11 +1180,30 @@ def generate_power_tree(ctx: BuildStepContext) -> None:
     """Generate power tree visualization and data exports."""
     app = ctx.require_app()
     solver = ctx.require_solver()
-    output_dir = config.build.paths.output_base.parent
+    output_dir = get_build_output_dir_for_config(config.build)
     export_power_tree(
         app,
         solver,
         mermaid_path=output_dir / "power_tree.md",
+    )
+    export_power_tree_json(
+        app,
+        solver,
+        json_path=config.build.paths.output_base.with_suffix(".power_tree.ato.json"),
+    )
+
+
+@muster.register(
+    "stackup",
+    dependencies=[build_design],
+    produces_artifact=True,
+)
+def generate_stackup(ctx: BuildStepContext) -> None:
+    """Generate PCB stackup JSON artifact."""
+    app = ctx.require_app()
+    export_stackup_json(
+        app,
+        path=config.build.paths.output_base.with_suffix(".stackup.json"),
     )
 
 
@@ -1151,24 +1213,26 @@ def generate_power_tree(ctx: BuildStepContext) -> None:
     produces_artifact=True,
 )
 def generate_datasheets(ctx: BuildStepContext) -> None:
+    """Wait for background datasheet downloads and copy into part directories."""
+    finalize_datasheet_downloads()
+
+
+@muster.register(
+    "data-interface-layout",
+    dependencies=[build_design],
+    produces_artifact=True,
+)
+def generate_bus_layouts(ctx: BuildStepContext) -> None:
+    """Generate a JSON export of all data interface trees."""
     app = ctx.require_app()
-    export_datasheets(
-        app, config.build.paths.documentation / "datasheets", progress=None
+    solver = ctx.require_solver()
+    export_data_interface_tree(
+        app,
+        path=config.build.paths.output_base.with_suffix(
+            ".data_interface_tree.ato.json"
+        ),
+        solver=solver,
     )
-
-
-# @muster.register(
-#     "i2c-tree",
-#     dependencies=[build_design],
-#     produces_artifact=True,
-# )
-# def generate_i2c_tree(
-#     app: fabll.Node, solver: Solver, pcb: F.PCB
-# ) -> None:
-#     """Generate a Mermaid diagram of the I2C bus tree."""
-#     export_i2c_tree(
-#         app, solver, config.build.paths.output_base.with_suffix(".i2c_tree.md")
-#     )
 
 
 @muster.register(
@@ -1178,8 +1242,11 @@ def generate_datasheets(ctx: BuildStepContext) -> None:
         generate_bom,
         generate_manifest,
         generate_variable_report,
-        # generate_power_tree,
+        generate_pinout,
+        generate_stackup,
+        generate_power_tree,
         generate_datasheets,
+        generate_bus_layouts,
     ],
     virtual=True,
 )
@@ -1192,14 +1259,53 @@ def generate_default(ctx: BuildStepContext) -> None:
     aliases=["*"],
     dependencies=[
         generate_default,
+        generate_glb,
         generate_manufacturing_data,
-        generate_3d_models,
     ],
     virtual=True,
 )
 def generate_all(ctx: BuildStepContext) -> None:
     """Generate all targets."""
     pass
+
+
+# Suffixes of files to collect into the manufacturing output folder.
+_MANUFACTURING_SUFFIXES = (
+    ".pcba.glb",
+    ".pcba.step",
+    ".bom.csv",
+    ".bom.json",
+    ".gerber.zip",
+    ".pick_and_place.csv",
+    ".jlcpcb_pick_and_place.csv",
+    ".variables.ato.json",
+    ".testpoints.json",
+)
+
+
+@muster.register(
+    "collect-manufacturing",
+    dependencies=[generate_all],
+    produces_artifact=True,
+)
+def collect_manufacturing(ctx: BuildStepContext) -> None:
+    """Copy manufacturing artifacts into <project_root>/manufacturing/<target>/."""
+    import shutil
+
+    target_name = config.build.name
+    mfg_dir = config.project.paths.root / "manufacturing" / target_name
+    mfg_dir.mkdir(parents=True, exist_ok=True)
+
+    copied = 0
+    for suffix in _MANUFACTURING_SUFFIXES:
+        src = config.build.paths.output_base.with_suffix(suffix)
+        if src.exists():
+            shutil.copy2(src, mfg_dir / src.name)
+            copied += 1
+        else:
+            logger.debug(f"Manufacturing artifact not found, skipping: {src.name}")
+
+    logger.info(f"Collected {copied} manufacturing artifacts into {mfg_dir}")
 
 
 if __name__ == "__main__":

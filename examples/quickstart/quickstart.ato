@@ -1,5 +1,11 @@
+import RectangularBoardShape
 import Resistor
 
 module App:
+    boardoutline = new RectangularBoardShape
+    boardoutline.x = 10mm
+    boardoutline.y = 4mm
+    boardoutline.corner_radius = 1mm
+
     r1 = new Resistor  # Create a new resistor
     r1.resistance = 50 kohm +/- 10%  # Set the resistor value

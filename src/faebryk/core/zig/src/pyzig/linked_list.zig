@@ -2,6 +2,7 @@ const std = @import("std");
 const compat = @import("compat");
 const py = @import("pybindings.zig");
 const pyzig_mod = @import("pyzig.zig");
+const cast = @import("cast");
 
 pub fn MutableLinkedList(comptime T: type) type {
     return struct {
@@ -9,14 +10,36 @@ pub fn MutableLinkedList(comptime T: type) type {
         ob_base: py.PyObject_HEAD,
         list: *compat.DoublyLinkedList(T),
         element_type_obj: ?*py.PyTypeObject,
+        parent: ?*py.PyObject = null,
 
-        fn create(list_ptr: *compat.DoublyLinkedList(T), element_type_obj: ?*py.PyTypeObject) ?*py.PyObject {
+        fn create(list_ptr: *compat.DoublyLinkedList(T), element_type_obj: ?*py.PyTypeObject, parent: ?*py.PyObject) ?*py.PyObject {
             const obj = py.PyType_GenericAlloc(&type_object, 0);
             if (obj == null) return null;
-            const self: *Self = @ptrCast(@alignCast(obj));
+            const self = cast.ctx(Self, obj);
             self.list = list_ptr;
             self.element_type_obj = element_type_obj;
+            self.parent = parent;
+            if (parent) |p| {
+                py.Py_INCREF(p);
+            }
             return obj;
+        }
+
+        fn list_dealloc(self: ?*py.PyObject) callconv(.c) void {
+            const s = cast.ctx(Self, self);
+            if (s.parent) |parent| {
+                py.Py_DECREF(parent);
+                s.parent = null;
+            }
+
+            if (py.Py_TYPE(self)) |type_obj| {
+                if (type_obj.tp_free) |free_fn_any| {
+                    const free_fn = @as(*const fn (?*py.PyObject) callconv(.c) void, @ptrCast(@alignCast(free_fn_any)));
+                    free_fn(self);
+                    return;
+                }
+            }
+            py._Py_Dealloc(self.?);
         }
 
         fn count(self: *Self) usize {
@@ -33,11 +56,11 @@ pub fn MutableLinkedList(comptime T: type) type {
         }
 
         fn sq_length(self: ?*py.PyObject) callconv(.c) isize {
-            const s: *Self = @ptrCast(@alignCast(self));
+            const s = cast.ctx(Self, self);
             return @intCast(s.count());
         }
         fn sq_item(self: ?*py.PyObject, index: isize) callconv(.c) ?*py.PyObject {
-            const s: *Self = @ptrCast(@alignCast(self));
+            const s = cast.ctx(Self, self);
             const len: isize = @intCast(s.count());
             const actual = if (index < 0) len + index else index;
             if (actual < 0 or actual >= len) {
@@ -54,7 +77,7 @@ pub fn MutableLinkedList(comptime T: type) type {
         }
 
         fn list_append(self: ?*py.PyObject, value: ?*py.PyObject) callconv(.c) ?*py.PyObject {
-            const s: *Self = @ptrCast(@alignCast(self));
+            const s = cast.ctx(Self, self);
             const Node = compat.DoublyLinkedList(T).Node;
             const node = std.heap.c_allocator.create(Node) catch {
                 py.PyErr_SetString(py.PyExc_MemoryError, "append failed");
@@ -71,7 +94,7 @@ pub fn MutableLinkedList(comptime T: type) type {
             return none;
         }
         fn list_insert(self: ?*py.PyObject, args: ?*py.PyObject) callconv(.c) ?*py.PyObject {
-            const s: *Self = @ptrCast(@alignCast(self));
+            const s = cast.ctx(Self, self);
             var index: isize = 0;
             var item: ?*py.PyObject = null;
             if (py.PyArg_ParseTuple(args, "iO", &index, &item) == 0) return null;
@@ -107,7 +130,7 @@ pub fn MutableLinkedList(comptime T: type) type {
         }
         fn list_clear(self: ?*py.PyObject, args: ?*py.PyObject) callconv(.c) ?*py.PyObject {
             _ = args;
-            const s: *Self = @ptrCast(@alignCast(self));
+            const s = cast.ctx(Self, self);
             while (s.list.pop()) |node| {
                 std.heap.c_allocator.destroy(node);
             }
@@ -116,9 +139,9 @@ pub fn MutableLinkedList(comptime T: type) type {
             return none;
         }
         fn list_remove(self: ?*py.PyObject, item: ?*py.PyObject) callconv(.c) ?*py.PyObject {
-            const s: *Self = @ptrCast(@alignCast(self));
+            const s = cast.ctx(Self, self);
             const Wrap = pyzig_mod.PyObjectWrapper(T);
-            const w: *Wrap = @ptrCast(@alignCast(item));
+            const w = cast.ctx(Wrap, item);
             var it = s.list.first;
             while (it) |n| : (it = n.next) {
                 if (&n.data == w.data) {
@@ -133,11 +156,11 @@ pub fn MutableLinkedList(comptime T: type) type {
             return null;
         }
         fn list_len(self: ?*py.PyObject) callconv(.c) ?*py.PyObject {
-            const s: *Self = @ptrCast(@alignCast(self));
+            const s = cast.ctx(Self, self);
             return py.PyLong_FromLong(@intCast(s.count()));
         }
         fn list_iter(self: ?*py.PyObject) callconv(.c) ?*py.PyObject {
-            const s: *Self = @ptrCast(@alignCast(self));
+            const s = cast.ctx(Self, self);
             const py_list = py.PyList_New(@intCast(s.count()));
             if (py_list == null) return null;
             var i: usize = 0;
@@ -156,7 +179,7 @@ pub fn MutableLinkedList(comptime T: type) type {
             return itobj;
         }
         fn list_pop(self: ?*py.PyObject, args: ?*py.PyObject) callconv(.c) ?*py.PyObject {
-            const s: *Self = @ptrCast(@alignCast(self));
+            const s = cast.ctx(Self, self);
             var index: isize = 0;
             if (py.PyArg_ParseTuple(args, "i", &index) == 0) return null;
             const len: isize = @intCast(s.count());
@@ -189,9 +212,11 @@ pub fn MutableLinkedList(comptime T: type) type {
                     const pyobj = py.PyType_GenericAlloc(type_obj, 0);
                     if (pyobj == null) return null;
                     const Wrap = pyzig_mod.PyObjectWrapper(T);
-                    const w: *Wrap = @ptrCast(@alignCast(pyobj));
+                    const w = cast.ctx(Wrap, pyobj);
                     w.data = item;
                     w.owned = false;
+                    w.parent = @ptrCast(&self.ob_base);
+                    py.Py_INCREF(@ptrCast(&self.ob_base));
                     return pyobj;
                 },
                 .@"enum" => {
@@ -235,7 +260,7 @@ pub fn MutableLinkedList(comptime T: type) type {
                 } else {},
                 .@"struct" => {
                     const Wrap = pyzig_mod.PyObjectWrapper(T);
-                    const w: *Wrap = @ptrCast(@alignCast(pyobj));
+                    const w = cast.ctx(Wrap, pyobj);
                     out.* = w.data.*;
                     return true;
                 },
@@ -249,7 +274,7 @@ pub fn MutableLinkedList(comptime T: type) type {
         fn list_richcompare(self: ?*py.PyObject, other: ?*py.PyObject, op: c_int) callconv(.c) ?*py.PyObject {
             // Support equality/inequality against any Python sequence
             // Only Py_EQ is defined in our bindings; treat all other ops as NE
-            const s: *Self = @ptrCast(@alignCast(self));
+            const s = cast.ctx(Self, self);
             const len_self: isize = @intCast(s.count());
             const len_other = py.PySequence_Size(other);
             if (len_other < 0) return py.Py_False();
@@ -281,14 +306,14 @@ pub fn MutableLinkedList(comptime T: type) type {
             }
         }
 
-        var type_object = py.PyTypeObject{ .ob_base = .{ .ob_base = .{ .ob_refcnt = 1, .ob_type = null }, .ob_size = 0 }, .tp_name = "pyzig.MutableList", .tp_basicsize = @sizeOf(Self), .tp_flags = py.Py_TPFLAGS_DEFAULT, .tp_as_sequence = &sequence_methods, .tp_iter = @ptrCast(@constCast(&list_iter)), .tp_methods = @as([*]py.PyMethodDef, @ptrCast(&list_methods)), .tp_richcompare = @ptrCast(@constCast(&list_richcompare)) };
+        var type_object = py.PyTypeObject{ .ob_base = .{ .ob_base = .{ .ob_refcnt = 1, .ob_type = null }, .ob_size = 0 }, .tp_name = "pyzig.MutableList", .tp_basicsize = @sizeOf(Self), .tp_dealloc = @ptrCast(@constCast(&list_dealloc)), .tp_flags = py.Py_TPFLAGS_DEFAULT, .tp_as_sequence = &sequence_methods, .tp_iter = @ptrCast(@constCast(&list_iter)), .tp_methods = @as([*]py.PyMethodDef, @ptrCast(&list_methods)), .tp_richcompare = @ptrCast(@constCast(&list_richcompare)) };
     };
 }
 
-pub fn createMutableList(comptime T: type, list_ptr: *compat.DoublyLinkedList(T), element_type_obj: ?*py.PyTypeObject) ?*py.PyObject {
+pub fn createMutableList(comptime T: type, list_ptr: *compat.DoublyLinkedList(T), element_type_obj: ?*py.PyTypeObject, parent: ?*py.PyObject) ?*py.PyObject {
     const L = MutableLinkedList(T);
     if (py.PyType_Ready(&L.type_object) < 0) return null;
-    return L.create(list_ptr, element_type_obj);
+    return L.create(list_ptr, element_type_obj, parent);
 }
 
 pub fn isLinkedList(comptime T: type) bool {

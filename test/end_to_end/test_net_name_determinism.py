@@ -7,7 +7,6 @@ from .conftest import EXEC_T
 def test_net_names_deterministic(build_app: EXEC_T, save_tmp_path_on_failure: None):
     # Build a simple chain so multiple nets are generated deterministically
     src = """
-        #pragma experiment("BRIDGE_CONNECT")
         import Resistor
         module App:
             r = new Resistor[3]

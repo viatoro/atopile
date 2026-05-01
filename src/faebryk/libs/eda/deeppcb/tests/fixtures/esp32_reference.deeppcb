@@ -1,0 +1,5395 @@
+{
+  "name": "kicad-pcb",
+  "resolution": {
+    "unit": "mm",
+    "value": 1000
+  },
+  "boundary": {
+    "shape": {
+      "type": "polyline",
+      "points": [
+        [
+          130750,
+          -110960
+        ],
+        [
+          130750,
+          -110960
+        ],
+        [
+          130286,
+          -111033
+        ],
+        [
+          129868,
+          -111246
+        ],
+        [
+          129536,
+          -111578
+        ],
+        [
+          129323,
+          -111996
+        ],
+        [
+          129250,
+          -112460
+        ],
+        [
+          129250,
+          -136230
+        ],
+        [
+          129323,
+          -136694
+        ],
+        [
+          129536,
+          -137112
+        ],
+        [
+          129868,
+          -137444
+        ],
+        [
+          130286,
+          -137657
+        ],
+        [
+          130750,
+          -137730
+        ],
+        [
+          163960,
+          -137730
+        ],
+        [
+          164424,
+          -137657
+        ],
+        [
+          164842,
+          -137444
+        ],
+        [
+          165174,
+          -137112
+        ],
+        [
+          165387,
+          -136694
+        ],
+        [
+          165460,
+          -136230
+        ],
+        [
+          165460,
+          -112460
+        ],
+        [
+          165387,
+          -111996
+        ],
+        [
+          165174,
+          -111578
+        ],
+        [
+          164842,
+          -111246
+        ],
+        [
+          164424,
+          -111033
+        ],
+        [
+          163960,
+          -110960
+        ],
+        [
+          130750,
+          -110960
+        ]
+      ]
+    },
+    "clearance": 200
+  },
+  "padstacks": [
+    {
+      "id": "Padstack_0",
+      "shape": {
+        "type": "rectangle",
+        "lowerLeft": [
+          -250,
+          -270
+        ],
+        "upperRight": [
+          250,
+          270
+        ]
+      },
+      "layers": [
+        0
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_1",
+      "shape": {
+        "type": "rectangle",
+        "lowerLeft": [
+          -525,
+          -350
+        ],
+        "upperRight": [
+          525,
+          350
+        ]
+      },
+      "layers": [
+        0
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_2",
+      "shape": {
+        "type": "rectangle",
+        "lowerLeft": [
+          -200,
+          -400
+        ],
+        "upperRight": [
+          200,
+          400
+        ]
+      },
+      "layers": [
+        0
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_3",
+      "shape": {
+        "type": "polygon",
+        "points": [
+          [
+            -720,
+            120
+          ],
+          [
+            -120,
+            720
+          ],
+          [
+            730,
+            720
+          ],
+          [
+            730,
+            -730
+          ],
+          [
+            -720,
+            -730
+          ]
+        ]
+      },
+      "layers": [
+        0
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_4",
+      "shape": {
+        "type": "rectangle",
+        "lowerLeft": [
+          -725,
+          -725
+        ],
+        "upperRight": [
+          725,
+          725
+        ]
+      },
+      "layers": [
+        0
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_5",
+      "shape": {
+        "type": "rectangle",
+        "lowerLeft": [
+          -350,
+          -350
+        ],
+        "upperRight": [
+          350,
+          350
+        ]
+      },
+      "layers": [
+        0
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_6",
+      "shape": {
+        "type": "rectangle",
+        "lowerLeft": [
+          -285,
+          -270
+        ],
+        "upperRight": [
+          285,
+          270
+        ]
+      },
+      "layers": [
+        0
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_7",
+      "shape": {
+        "type": "rectangle",
+        "lowerLeft": [
+          -265,
+          -535
+        ],
+        "upperRight": [
+          265,
+          535
+        ]
+      },
+      "layers": [
+        0
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_8",
+      "shape": {
+        "type": "path",
+        "points": [
+          [
+            0,
+            125.0
+          ],
+          [
+            0,
+            -125.0
+          ]
+        ],
+        "width": 360
+      },
+      "layers": [
+        0
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_9",
+      "shape": {
+        "type": "rectangle",
+        "lowerLeft": [
+          -500,
+          -800
+        ],
+        "upperRight": [
+          500,
+          800
+        ]
+      },
+      "layers": [
+        0
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_10",
+      "shape": {
+        "type": "rectangle",
+        "lowerLeft": [
+          -500,
+          -750
+        ],
+        "upperRight": [
+          500,
+          750
+        ]
+      },
+      "layers": [
+        0
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_11",
+      "shape": {
+        "type": "rectangle",
+        "lowerLeft": [
+          -405,
+          -430
+        ],
+        "upperRight": [
+          405,
+          430
+        ]
+      },
+      "layers": [
+        0
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_12",
+      "shape": {
+        "type": "circle",
+        "center": [
+          0,
+          0
+        ],
+        "radius": 350
+      },
+      "layers": [
+        0,
+        1
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_13",
+      "shape": {
+        "type": "rectangle",
+        "lowerLeft": [
+          -275,
+          -550
+        ],
+        "upperRight": [
+          275,
+          550
+        ]
+      },
+      "layers": [
+        0
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_14",
+      "shape": {
+        "type": "rectangle",
+        "lowerLeft": [
+          -150,
+          -550
+        ],
+        "upperRight": [
+          150,
+          550
+        ]
+      },
+      "layers": [
+        0
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_15",
+      "shape": {
+        "type": "path",
+        "points": [
+          [
+            0,
+            450.0
+          ],
+          [
+            0,
+            -450.0
+          ]
+        ],
+        "width": 1100
+      },
+      "layers": [
+        0,
+        1
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_16",
+      "shape": {
+        "type": "path",
+        "points": [
+          [
+            0,
+            300.0
+          ],
+          [
+            0,
+            -300.0
+          ]
+        ],
+        "width": 1200
+      },
+      "layers": [
+        0,
+        1
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_17",
+      "shape": {
+        "type": "rectangle",
+        "lowerLeft": [
+          -400,
+          -450
+        ],
+        "upperRight": [
+          400,
+          450
+        ]
+      },
+      "layers": [
+        0
+      ],
+      "allowVia": false
+    },
+    {
+      "id": "Padstack_18",
+      "shape": {
+        "type": "circle",
+        "center": [
+          0,
+          0
+        ],
+        "radius": 300
+      },
+      "layers": [
+        0,
+        1
+      ],
+      "allowVia": true
+    }
+  ],
+  "componentDefinitions": [
+    {
+      "id": "C3",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_0",
+          "position": [
+            -420,
+            0
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_0",
+          "position": [
+            420,
+            0
+          ],
+          "rotation": 270
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -920,
+            -500
+          ],
+          [
+            920,
+            -500
+          ],
+          [
+            920,
+            500
+          ],
+          [
+            -920,
+            500
+          ],
+          [
+            -920,
+            -500
+          ]
+        ]
+      }
+    },
+    {
+      "id": "SW1",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_1",
+          "position": [
+            -2100,
+            1070
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_1",
+          "position": [
+            2100,
+            1070
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "3",
+          "padstack": "Padstack_1",
+          "position": [
+            -2100,
+            -1070
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "4",
+          "padstack": "Padstack_1",
+          "position": [
+            2100,
+            -1070
+          ],
+          "rotation": 270
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -2600,
+            -1570
+          ],
+          [
+            2600,
+            -1570
+          ],
+          [
+            2600,
+            1570
+          ],
+          [
+            -2600,
+            1570
+          ],
+          [
+            -2600,
+            -1570
+          ]
+        ]
+      }
+    },
+    {
+      "id": "C5",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_0",
+          "position": [
+            -420,
+            0
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_0",
+          "position": [
+            420,
+            0
+          ],
+          "rotation": 90
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -920,
+            -500
+          ],
+          [
+            920,
+            -500
+          ],
+          [
+            920,
+            500
+          ],
+          [
+            -920,
+            500
+          ],
+          [
+            -920,
+            -500
+          ]
+        ]
+      }
+    },
+    {
+      "id": "U1",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_2",
+          "position": [
+            -5900,
+            4000
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_2",
+          "position": [
+            -5900,
+            3200
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "3",
+          "padstack": "Padstack_2",
+          "position": [
+            -5900,
+            2400
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "4",
+          "padstack": "Padstack_2",
+          "position": [
+            -5900,
+            1600
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "5",
+          "padstack": "Padstack_2",
+          "position": [
+            -5900,
+            800
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "6",
+          "padstack": "Padstack_2",
+          "position": [
+            -5900,
+            0
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "7",
+          "padstack": "Padstack_2",
+          "position": [
+            -5900,
+            -800
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "8",
+          "padstack": "Padstack_2",
+          "position": [
+            -5900,
+            -1600
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "9",
+          "padstack": "Padstack_2",
+          "position": [
+            -5900,
+            -2400
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "10",
+          "padstack": "Padstack_2",
+          "position": [
+            -5900,
+            -3200
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "11",
+          "padstack": "Padstack_2",
+          "position": [
+            -5900,
+            -4000
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "12",
+          "padstack": "Padstack_2",
+          "position": [
+            -4800,
+            -4900
+          ],
+          "rotation": 180
+        },
+        {
+          "id": "13",
+          "padstack": "Padstack_2",
+          "position": [
+            -4000,
+            -4900
+          ],
+          "rotation": 180
+        },
+        {
+          "id": "14",
+          "padstack": "Padstack_2",
+          "position": [
+            -3200,
+            -4900
+          ],
+          "rotation": 180
+        },
+        {
+          "id": "15",
+          "padstack": "Padstack_2",
+          "position": [
+            -2400,
+            -4900
+          ],
+          "rotation": 180
+        },
+        {
+          "id": "16",
+          "padstack": "Padstack_2",
+          "position": [
+            -1600,
+            -4900
+          ],
+          "rotation": 180
+        },
+        {
+          "id": "17",
+          "padstack": "Padstack_2",
+          "position": [
+            -800,
+            -4900
+          ],
+          "rotation": 180
+        },
+        {
+          "id": "18",
+          "padstack": "Padstack_2",
+          "position": [
+            0,
+            -4900
+          ],
+          "rotation": 180
+        },
+        {
+          "id": "19",
+          "padstack": "Padstack_2",
+          "position": [
+            800,
+            -4900
+          ],
+          "rotation": 180
+        },
+        {
+          "id": "20",
+          "padstack": "Padstack_2",
+          "position": [
+            1600,
+            -4900
+          ],
+          "rotation": 180
+        },
+        {
+          "id": "21",
+          "padstack": "Padstack_2",
+          "position": [
+            2400,
+            -4900
+          ],
+          "rotation": 180
+        },
+        {
+          "id": "22",
+          "padstack": "Padstack_2",
+          "position": [
+            3200,
+            -4900
+          ],
+          "rotation": 180
+        },
+        {
+          "id": "23",
+          "padstack": "Padstack_2",
+          "position": [
+            4000,
+            -4900
+          ],
+          "rotation": 180
+        },
+        {
+          "id": "24",
+          "padstack": "Padstack_2",
+          "position": [
+            4800,
+            -4900
+          ],
+          "rotation": 180
+        },
+        {
+          "id": "25",
+          "padstack": "Padstack_2",
+          "position": [
+            5900,
+            -4000
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "26",
+          "padstack": "Padstack_2",
+          "position": [
+            5900,
+            -3200
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "27",
+          "padstack": "Padstack_2",
+          "position": [
+            5900,
+            -2400
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "28",
+          "padstack": "Padstack_2",
+          "position": [
+            5900,
+            -1600
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "29",
+          "padstack": "Padstack_2",
+          "position": [
+            5900,
+            -800
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "30",
+          "padstack": "Padstack_2",
+          "position": [
+            5900,
+            0
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "31",
+          "padstack": "Padstack_2",
+          "position": [
+            5900,
+            800
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "32",
+          "padstack": "Padstack_2",
+          "position": [
+            5900,
+            1600
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "33",
+          "padstack": "Padstack_2",
+          "position": [
+            5900,
+            2400
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "34",
+          "padstack": "Padstack_2",
+          "position": [
+            5900,
+            3200
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "35",
+          "padstack": "Padstack_2",
+          "position": [
+            5900,
+            4000
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "36",
+          "padstack": "Padstack_2",
+          "position": [
+            4800,
+            4900
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "37",
+          "padstack": "Padstack_2",
+          "position": [
+            4000,
+            4900
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "38",
+          "padstack": "Padstack_2",
+          "position": [
+            3200,
+            4900
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "39",
+          "padstack": "Padstack_2",
+          "position": [
+            2400,
+            4900
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "40",
+          "padstack": "Padstack_2",
+          "position": [
+            1600,
+            4900
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "41",
+          "padstack": "Padstack_2",
+          "position": [
+            800,
+            4900
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "42",
+          "padstack": "Padstack_2",
+          "position": [
+            0,
+            4900
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "43",
+          "padstack": "Padstack_2",
+          "position": [
+            -800,
+            4900
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "44",
+          "padstack": "Padstack_2",
+          "position": [
+            -1600,
+            4900
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "45",
+          "padstack": "Padstack_2",
+          "position": [
+            -2400,
+            4900
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "46",
+          "padstack": "Padstack_2",
+          "position": [
+            -3200,
+            4900
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "47",
+          "padstack": "Padstack_2",
+          "position": [
+            -4000,
+            4900
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "48",
+          "padstack": "Padstack_2",
+          "position": [
+            -4800,
+            4900
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "49",
+          "padstack": "Padstack_3",
+          "position": [
+            -1980,
+            1980
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "49@1",
+          "padstack": "Padstack_4",
+          "position": [
+            -1980,
+            0
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "49@2",
+          "padstack": "Padstack_4",
+          "position": [
+            -1980,
+            -1980
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "49@3",
+          "padstack": "Padstack_4",
+          "position": [
+            0,
+            1970
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "49@4",
+          "padstack": "Padstack_4",
+          "position": [
+            0,
+            0
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "49@5",
+          "padstack": "Padstack_4",
+          "position": [
+            0,
+            -1980
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "49@6",
+          "padstack": "Padstack_4",
+          "position": [
+            1970,
+            1970
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "49@7",
+          "padstack": "Padstack_4",
+          "position": [
+            1970,
+            0
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "49@8",
+          "padstack": "Padstack_4",
+          "position": [
+            1970,
+            -1980
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "50",
+          "padstack": "Padstack_5",
+          "position": [
+            5950,
+            4950
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "51",
+          "padstack": "Padstack_5",
+          "position": [
+            5950,
+            -4950
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "52",
+          "padstack": "Padstack_5",
+          "position": [
+            -5950,
+            -4950
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "53",
+          "padstack": "Padstack_5",
+          "position": [
+            -5950,
+            4950
+          ],
+          "rotation": 0
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -6450,
+            -5450
+          ],
+          [
+            6450,
+            -5450
+          ],
+          [
+            6450,
+            5450
+          ],
+          [
+            -6450,
+            5450
+          ],
+          [
+            -6450,
+            -5450
+          ]
+        ]
+      }
+    },
+    {
+      "id": "R3",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_6",
+          "position": [
+            -430,
+            0
+          ],
+          "rotation": 180
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_6",
+          "position": [
+            430,
+            0
+          ],
+          "rotation": 180
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -930,
+            -500
+          ],
+          [
+            930,
+            -500
+          ],
+          [
+            930,
+            500
+          ],
+          [
+            -930,
+            500
+          ],
+          [
+            -930,
+            -500
+          ]
+        ]
+      }
+    },
+    {
+      "id": "D1",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_7",
+          "position": [
+            -950,
+            -1150
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_7",
+          "position": [
+            0,
+            -1150
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "3",
+          "padstack": "Padstack_7",
+          "position": [
+            950,
+            -1150
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "4",
+          "padstack": "Padstack_7",
+          "position": [
+            950,
+            1150
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "5",
+          "padstack": "Padstack_7",
+          "position": [
+            0,
+            1150
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "6",
+          "padstack": "Padstack_7",
+          "position": [
+            -950,
+            1150
+          ],
+          "rotation": 0
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -1450,
+            -1650
+          ],
+          [
+            1450,
+            -1650
+          ],
+          [
+            1450,
+            1650
+          ],
+          [
+            -1450,
+            1650
+          ],
+          [
+            -1450,
+            -1650
+          ]
+        ]
+      }
+    },
+    {
+      "id": "R2",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_6",
+          "position": [
+            -430,
+            0
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_6",
+          "position": [
+            430,
+            0
+          ],
+          "rotation": 0
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -930,
+            -500
+          ],
+          [
+            930,
+            -500
+          ],
+          [
+            930,
+            500
+          ],
+          [
+            -930,
+            500
+          ],
+          [
+            -930,
+            -500
+          ]
+        ]
+      }
+    },
+    {
+      "id": "U3",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_8",
+          "position": [
+            -1030,
+            650
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_8",
+          "position": [
+            -1030,
+            0
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "3",
+          "padstack": "Padstack_8",
+          "position": [
+            -1030,
+            -650
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "4",
+          "padstack": "Padstack_8",
+          "position": [
+            1030,
+            -650
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "5",
+          "padstack": "Padstack_8",
+          "position": [
+            1030,
+            0
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "6",
+          "padstack": "Padstack_8",
+          "position": [
+            1030,
+            650
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "7",
+          "padstack": "Padstack_9",
+          "position": [
+            0,
+            0
+          ],
+          "rotation": 0
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -1530,
+            -1150
+          ],
+          [
+            1530,
+            -1150
+          ],
+          [
+            1530,
+            1150
+          ],
+          [
+            -1530,
+            1150
+          ],
+          [
+            -1530,
+            -1150
+          ]
+        ]
+      }
+    },
+    {
+      "id": "R5",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_6",
+          "position": [
+            -430,
+            0
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_6",
+          "position": [
+            430,
+            0
+          ],
+          "rotation": 0
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -930,
+            -500
+          ],
+          [
+            930,
+            -500
+          ],
+          [
+            930,
+            500
+          ],
+          [
+            -930,
+            500
+          ],
+          [
+            -930,
+            -500
+          ]
+        ]
+      }
+    },
+    {
+      "id": "R8",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_6",
+          "position": [
+            -430,
+            0
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_6",
+          "position": [
+            430,
+            0
+          ],
+          "rotation": 0
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -930,
+            -500
+          ],
+          [
+            930,
+            -500
+          ],
+          [
+            930,
+            500
+          ],
+          [
+            -930,
+            500
+          ],
+          [
+            -930,
+            -500
+          ]
+        ]
+      }
+    },
+    {
+      "id": "F1",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_10",
+          "position": [
+            -1100,
+            0
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_10",
+          "position": [
+            1100,
+            0
+          ],
+          "rotation": 90
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -1600,
+            -500
+          ],
+          [
+            1600,
+            -500
+          ],
+          [
+            1600,
+            500
+          ],
+          [
+            -1600,
+            500
+          ],
+          [
+            -1600,
+            -500
+          ]
+        ]
+      }
+    },
+    {
+      "id": "SW2",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_1",
+          "position": [
+            -2100,
+            1070
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_1",
+          "position": [
+            2100,
+            1070
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "3",
+          "padstack": "Padstack_1",
+          "position": [
+            -2100,
+            -1070
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "4",
+          "padstack": "Padstack_1",
+          "position": [
+            2100,
+            -1070
+          ],
+          "rotation": 90
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -2600,
+            -1570
+          ],
+          [
+            2600,
+            -1570
+          ],
+          [
+            2600,
+            1570
+          ],
+          [
+            -2600,
+            1570
+          ],
+          [
+            -2600,
+            -1570
+          ]
+        ]
+      }
+    },
+    {
+      "id": "C1",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_0",
+          "position": [
+            -420,
+            0
+          ],
+          "rotation": 180
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_0",
+          "position": [
+            420,
+            0
+          ],
+          "rotation": 180
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -920,
+            -500
+          ],
+          [
+            920,
+            -500
+          ],
+          [
+            920,
+            500
+          ],
+          [
+            -920,
+            500
+          ],
+          [
+            -920,
+            -500
+          ]
+        ]
+      }
+    },
+    {
+      "id": "R7",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_11",
+          "position": [
+            -750,
+            0
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_11",
+          "position": [
+            750,
+            0
+          ],
+          "rotation": 90
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -1250,
+            -500
+          ],
+          [
+            1250,
+            -500
+          ],
+          [
+            1250,
+            500
+          ],
+          [
+            -1250,
+            500
+          ],
+          [
+            -1250,
+            -500
+          ]
+        ]
+      }
+    },
+    {
+      "id": "R6",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_11",
+          "position": [
+            -750,
+            0
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_11",
+          "position": [
+            750,
+            0
+          ],
+          "rotation": 90
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -1250,
+            -500
+          ],
+          [
+            1250,
+            -500
+          ],
+          [
+            1250,
+            500
+          ],
+          [
+            -1250,
+            500
+          ],
+          [
+            -1250,
+            -500
+          ]
+        ]
+      }
+    },
+    {
+      "id": "USB1",
+      "pins": [
+        {
+          "id": "pad0",
+          "padstack": "Padstack_12",
+          "position": [
+            -2890,
+            -370
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "pad1",
+          "padstack": "Padstack_12",
+          "position": [
+            2890,
+            -370
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "1",
+          "padstack": "Padstack_13",
+          "position": [
+            -3200,
+            710
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_13",
+          "position": [
+            -2400,
+            710
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "3",
+          "padstack": "Padstack_14",
+          "position": [
+            -1750,
+            710
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "4",
+          "padstack": "Padstack_14",
+          "position": [
+            -1250,
+            710
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "5",
+          "padstack": "Padstack_14",
+          "position": [
+            -750,
+            710
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "6",
+          "padstack": "Padstack_14",
+          "position": [
+            -250,
+            710
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "7",
+          "padstack": "Padstack_14",
+          "position": [
+            250,
+            710
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "8",
+          "padstack": "Padstack_14",
+          "position": [
+            750,
+            710
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "9",
+          "padstack": "Padstack_14",
+          "position": [
+            1250,
+            710
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "10",
+          "padstack": "Padstack_14",
+          "position": [
+            1750,
+            710
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "11",
+          "padstack": "Padstack_13",
+          "position": [
+            2400,
+            710
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "12",
+          "padstack": "Padstack_13",
+          "position": [
+            3200,
+            710
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "13",
+          "padstack": "Padstack_15",
+          "position": [
+            -4320,
+            160
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "14",
+          "padstack": "Padstack_15",
+          "position": [
+            4320,
+            160
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "15",
+          "padstack": "Padstack_16",
+          "position": [
+            4320,
+            -4050
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "16",
+          "padstack": "Padstack_16",
+          "position": [
+            -4320,
+            -4050
+          ],
+          "rotation": 0
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -4820,
+            -4550
+          ],
+          [
+            4820,
+            -4550
+          ],
+          [
+            4820,
+            1210
+          ],
+          [
+            -4820,
+            1210
+          ],
+          [
+            -4820,
+            -4550
+          ]
+        ]
+      }
+    },
+    {
+      "id": "R1",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_6",
+          "position": [
+            -430,
+            0
+          ],
+          "rotation": 270
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_6",
+          "position": [
+            430,
+            0
+          ],
+          "rotation": 270
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -930,
+            -500
+          ],
+          [
+            930,
+            -500
+          ],
+          [
+            930,
+            500
+          ],
+          [
+            -930,
+            500
+          ],
+          [
+            -930,
+            -500
+          ]
+        ]
+      }
+    },
+    {
+      "id": "C4",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_17",
+          "position": [
+            -700,
+            0
+          ],
+          "rotation": 90
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_17",
+          "position": [
+            700,
+            0
+          ],
+          "rotation": 90
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -1200,
+            -500
+          ],
+          [
+            1200,
+            -500
+          ],
+          [
+            1200,
+            500
+          ],
+          [
+            -1200,
+            500
+          ],
+          [
+            -1200,
+            -500
+          ]
+        ]
+      }
+    },
+    {
+      "id": "C2",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_0",
+          "position": [
+            -420,
+            0
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_0",
+          "position": [
+            420,
+            0
+          ],
+          "rotation": 0
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -920,
+            -500
+          ],
+          [
+            920,
+            -500
+          ],
+          [
+            920,
+            500
+          ],
+          [
+            -920,
+            500
+          ],
+          [
+            -920,
+            -500
+          ]
+        ]
+      }
+    },
+    {
+      "id": "R4",
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_6",
+          "position": [
+            -430,
+            0
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_6",
+          "position": [
+            430,
+            0
+          ],
+          "rotation": 0
+        }
+      ],
+      "keepouts": [],
+      "outline": {
+        "type": "polyline",
+        "points": [
+          [
+            -930,
+            -500
+          ],
+          [
+            930,
+            -500
+          ],
+          [
+            930,
+            500
+          ],
+          [
+            -930,
+            500
+          ],
+          [
+            -930,
+            -500
+          ]
+        ]
+      }
+    }
+  ],
+  "components": [
+    {
+      "id": "C3",
+      "definition": "C3",
+      "position": [
+        137000,
+        -126250
+      ],
+      "rotation": -90,
+      "side": "FRONT",
+      "partNumber": "C3:100nF \u00b110%"
+    },
+    {
+      "id": "SW1",
+      "definition": "SW1",
+      "position": [
+        161600,
+        -125400
+      ],
+      "rotation": -90,
+      "side": "FRONT",
+      "partNumber": "SW1:ALPSALPINE_SKRPACE010:KEY-SMD_4P-L4.2-W3.2-P2.20-LS4.6"
+    },
+    {
+      "id": "C5",
+      "definition": "C5",
+      "position": [
+        145600,
+        -119400
+      ],
+      "rotation": 90,
+      "side": "FRONT",
+      "partNumber": "C5:100nF \u00b110%"
+    },
+    {
+      "id": "U1",
+      "definition": "U1",
+      "position": [
+        153100,
+        -122400
+      ],
+      "rotation": 0,
+      "side": "FRONT",
+      "partNumber": "U1:Espressif_Systems_ESP32_C3_MINI_1_N4:WIFIM-SMD_ESP32-C3-MINI-1"
+    },
+    {
+      "id": "R3",
+      "definition": "R3",
+      "position": [
+        144000,
+        -120800
+      ],
+      "rotation": 180,
+      "side": "FRONT",
+      "partNumber": "R3:10k\u03a9 \u00b11%"
+    },
+    {
+      "id": "D1",
+      "definition": "D1",
+      "position": [
+        134750,
+        -127000
+      ],
+      "rotation": 0,
+      "side": "FRONT",
+      "partNumber": "D1:STMicroelectronics_USBLC6_2SC6:SOT-23-6_L2.9-W1.6-P0.95-LS2.8-BL"
+    },
+    {
+      "id": "R2",
+      "definition": "R2",
+      "position": [
+        133350,
+        -121220
+      ],
+      "rotation": 0,
+      "side": "FRONT",
+      "partNumber": "R2:1.82k\u03a9 \u00b11%"
+    },
+    {
+      "id": "U3",
+      "definition": "U3",
+      "position": [
+        135100,
+        -119460
+      ],
+      "rotation": 0,
+      "side": "FRONT",
+      "partNumber": "U3:Texas_Instruments_TLV75901PDRVR:WSON-6_L2.0-W2.0-P0.65-TL-EP"
+    },
+    {
+      "id": "R5",
+      "definition": "R5",
+      "position": [
+        158850,
+        -128900
+      ],
+      "rotation": 0,
+      "side": "FRONT",
+      "partNumber": "R5:5.1k\u03a9 \u00b11%"
+    },
+    {
+      "id": "R8",
+      "definition": "R8",
+      "position": [
+        144000,
+        -122000
+      ],
+      "rotation": 0,
+      "side": "FRONT",
+      "partNumber": "R8:10k\u03a9 \u00b11%"
+    },
+    {
+      "id": "F1",
+      "definition": "F1",
+      "position": [
+        130750,
+        -127250
+      ],
+      "rotation": 90,
+      "side": "FRONT",
+      "partNumber": "F1:BHFUSE_BSMD0805_050_15V:F0805"
+    },
+    {
+      "id": "SW2",
+      "definition": "SW2",
+      "position": [
+        144600,
+        -125400
+      ],
+      "rotation": 90,
+      "side": "FRONT",
+      "partNumber": "SW2:ALPSALPINE_SKRPACE010:KEY-SMD_4P-L4.2-W3.2-P2.20-LS4.6"
+    },
+    {
+      "id": "C1",
+      "definition": "C1",
+      "position": [
+        136790,
+        -121220
+      ],
+      "rotation": 180,
+      "side": "FRONT",
+      "partNumber": "C1:1\u00b5F \u00b110%"
+    },
+    {
+      "id": "R7",
+      "definition": "R7",
+      "position": [
+        138250,
+        -127000
+      ],
+      "rotation": 90,
+      "side": "FRONT",
+      "partNumber": "R7:10k\u03a9 \u00b11%"
+    },
+    {
+      "id": "R6",
+      "definition": "R6",
+      "position": [
+        132500,
+        -127000
+      ],
+      "rotation": 90,
+      "side": "FRONT",
+      "partNumber": "R6:10k\u03a9 \u00b11%"
+    },
+    {
+      "id": "USB1",
+      "definition": "USB1",
+      "position": [
+        134750,
+        -131080
+      ],
+      "rotation": 0,
+      "side": "FRONT",
+      "partNumber": "USB1:SHOU_HAN_TYPE_C_16PIN_2MD_073:USB-C-SMD_TYPE-C-6PIN-2MD-073"
+    },
+    {
+      "id": "R1",
+      "definition": "R1",
+      "position": [
+        132920,
+        -119470
+      ],
+      "rotation": -90,
+      "side": "FRONT",
+      "partNumber": "R1:9.09k\u03a9 \u00b11%"
+    },
+    {
+      "id": "C4",
+      "definition": "C4",
+      "position": [
+        144100,
+        -118650
+      ],
+      "rotation": 90,
+      "side": "FRONT",
+      "partNumber": "C4:22\u00b5F \u00b120%"
+    },
+    {
+      "id": "C2",
+      "definition": "C2",
+      "position": [
+        133585,
+        -117732
+      ],
+      "rotation": 0,
+      "side": "FRONT",
+      "partNumber": "C2:1\u00b5F \u00b110%"
+    },
+    {
+      "id": "R4",
+      "definition": "R4",
+      "position": [
+        156700,
+        -128900
+      ],
+      "rotation": 0,
+      "side": "FRONT",
+      "partNumber": "R4:10k\u03a9 \u00b11%"
+    }
+  ],
+  "layers": [
+    {
+      "id": "F.Cu",
+      "keepouts": [],
+      "type": "signal"
+    },
+    {
+      "id": "B.Cu",
+      "keepouts": [],
+      "type": "signal"
+    }
+  ],
+  "nets": [
+    {
+      "id": "hv",
+      "pins": [
+        "C3-1",
+        "D1-5",
+        "U3-4",
+        "U3-6",
+        "F1-2",
+        "C1-1"
+      ]
+    },
+    {
+      "id": "lv",
+      "pins": [
+        "C3-2",
+        "SW1-1",
+        "SW1-2",
+        "C5-2",
+        "U1-1",
+        "U1-2",
+        "U1-11",
+        "U1-14",
+        "U1-36",
+        "U1-37",
+        "U1-38",
+        "U1-39",
+        "U1-40",
+        "U1-41",
+        "U1-42",
+        "U1-43",
+        "U1-44",
+        "U1-45",
+        "U1-46",
+        "U1-47",
+        "U1-48",
+        "U1-49",
+        "U1-49@1",
+        "U1-49@2",
+        "U1-49@3",
+        "U1-49@4",
+        "U1-49@5",
+        "U1-49@6",
+        "U1-49@7",
+        "U1-49@8",
+        "U1-50",
+        "U1-51",
+        "U1-52",
+        "U1-53",
+        "D1-2",
+        "R2-2",
+        "U3-3",
+        "U3-7",
+        "SW2-1",
+        "SW2-2",
+        "C1-2",
+        "R7-2",
+        "R6-2",
+        "USB1-1",
+        "USB1-12",
+        "USB1-13",
+        "USB1-14",
+        "USB1-15",
+        "USB1-16",
+        "C4-2",
+        "C2-2"
+      ]
+    },
+    {
+      "id": "output",
+      "pins": [
+        "SW1-3",
+        "SW1-4",
+        "U1-23",
+        "R5-2"
+      ]
+    },
+    {
+      "id": "power-hv",
+      "pins": [
+        "C5-1",
+        "U1-3",
+        "R3-2",
+        "U3-1",
+        "R5-1",
+        "R8-1",
+        "R1-1",
+        "C4-1",
+        "C2-1",
+        "R4-2"
+      ]
+    },
+    {
+      "id": "DATA_1",
+      "pins": [
+        "U1-5",
+        "R3-1"
+      ]
+    },
+    {
+      "id": "WS",
+      "pins": [
+        "U1-6"
+      ]
+    },
+    {
+      "id": "N_TRST",
+      "pins": [
+        "U1-8",
+        "R8-2",
+        "SW2-3",
+        "SW2-4"
+      ]
+    },
+    {
+      "id": "SCK",
+      "pins": [
+        "U1-12"
+      ]
+    },
+    {
+      "id": "SD",
+      "pins": [
+        "U1-13"
+      ]
+    },
+    {
+      "id": "CHIP_SELECT",
+      "pins": [
+        "U1-16"
+      ]
+    },
+    {
+      "id": "DATA_3",
+      "pins": [
+        "U1-18"
+      ]
+    },
+    {
+      "id": "DATA_2",
+      "pins": [
+        "U1-19"
+      ]
+    },
+    {
+      "id": "CLOCK",
+      "pins": [
+        "U1-20"
+      ]
+    },
+    {
+      "id": "DATA_0",
+      "pins": [
+        "U1-21"
+      ]
+    },
+    {
+      "id": "MISO",
+      "pins": [
+        "U1-22",
+        "R4-1"
+      ]
+    },
+    {
+      "id": "DATA_N",
+      "pins": [
+        "U1-26",
+        "D1-1",
+        "D1-6",
+        "USB1-5",
+        "USB1-7"
+      ]
+    },
+    {
+      "id": "DATA_P",
+      "pins": [
+        "U1-27",
+        "D1-3",
+        "D1-4",
+        "USB1-6",
+        "USB1-8"
+      ]
+    },
+    {
+      "id": "RX",
+      "pins": [
+        "U1-30"
+      ]
+    },
+    {
+      "id": "TX",
+      "pins": [
+        "U1-31"
+      ]
+    },
+    {
+      "id": "ref_out-hv",
+      "pins": [
+        "R2-1",
+        "U3-2",
+        "R1-2"
+      ]
+    },
+    {
+      "id": "DNC",
+      "pins": [
+        "U3-5"
+      ]
+    },
+    {
+      "id": "power_vbus-hv",
+      "pins": [
+        "F1-1",
+        "USB1-2",
+        "USB1-11"
+      ]
+    },
+    {
+      "id": "10",
+      "pins": [
+        "R7-1",
+        "USB1-10"
+      ]
+    },
+    {
+      "id": "4",
+      "pins": [
+        "R6-1",
+        "USB1-4"
+      ]
+    },
+    {
+      "id": "3",
+      "pins": [
+        "USB1-3"
+      ]
+    },
+    {
+      "id": "9",
+      "pins": [
+        "USB1-9"
+      ]
+    }
+  ],
+  "netClasses": [
+    {
+      "id": "__default__",
+      "nets": [],
+      "clearance": 200,
+      "trackWidth": 200,
+      "viaDefinition": "Padstack_18",
+      "viaPriority": [
+        [
+          "Padstack_18"
+        ]
+      ]
+    }
+  ],
+  "planes": [
+    {
+      "netId": "lv",
+      "layer": 0,
+      "shape": {
+        "type": "polygonWithHoles",
+        "outline": [
+          [
+            129500,
+            -136250
+          ],
+          [
+            140000,
+            -136250
+          ],
+          [
+            140000,
+            -124000
+          ],
+          [
+            129500,
+            -124000
+          ]
+        ],
+        "holes": []
+      }
+    },
+    {
+      "netId": "lv",
+      "layer": 1,
+      "shape": {
+        "type": "polygonWithHoles",
+        "outline": [
+          [
+            129500,
+            -136250
+          ],
+          [
+            140000,
+            -136250
+          ],
+          [
+            140000,
+            -124000
+          ],
+          [
+            129500,
+            -124000
+          ]
+        ],
+        "holes": []
+      }
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "shape": {
+        "type": "polygonWithHoles",
+        "outline": [
+          [
+            129480,
+            -116820
+          ],
+          [
+            165500,
+            -116820
+          ],
+          [
+            165540,
+            -116860
+          ],
+          [
+            165540,
+            -137730
+          ],
+          [
+            165440,
+            -137830
+          ],
+          [
+            129480,
+            -137830
+          ]
+        ],
+        "holes": []
+      }
+    },
+    {
+      "netId": "lv",
+      "layer": 1,
+      "shape": {
+        "type": "polygonWithHoles",
+        "outline": [
+          [
+            129480,
+            -116820
+          ],
+          [
+            165500,
+            -116820
+          ],
+          [
+            165540,
+            -116860
+          ],
+          [
+            165540,
+            -137730
+          ],
+          [
+            165440,
+            -137830
+          ],
+          [
+            129480,
+            -137830
+          ]
+        ],
+        "holes": []
+      }
+    }
+  ],
+  "wires": [
+    {
+      "netId": "ref_out-hv",
+      "layer": 0,
+      "start": [
+        133425,
+        -119900
+      ],
+      "end": [
+        132920,
+        -119900
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "ref_out-hv",
+      "layer": 0,
+      "start": [
+        132920,
+        -119900
+      ],
+      "end": [
+        132920,
+        -121220
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "ref_out-hv",
+      "layer": 0,
+      "start": [
+        134070,
+        -119460
+      ],
+      "end": [
+        133865,
+        -119460
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "ref_out-hv",
+      "layer": 0,
+      "start": [
+        133865,
+        -119460
+      ],
+      "end": [
+        133425,
+        -119900
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_1",
+      "layer": 0,
+      "start": [
+        144430,
+        -120800
+      ],
+      "end": [
+        144500,
+        -120800
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_1",
+      "layer": 0,
+      "start": [
+        145300,
+        -121600
+      ],
+      "end": [
+        147200,
+        -121600
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_1",
+      "layer": 0,
+      "start": [
+        144500,
+        -120800
+      ],
+      "end": [
+        145300,
+        -121600
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "output",
+      "layer": 0,
+      "start": [
+        158664,
+        -128150
+      ],
+      "end": [
+        157350,
+        -128150
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "output",
+      "layer": 0,
+      "start": [
+        157100,
+        -127900
+      ],
+      "end": [
+        157100,
+        -127300
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "output",
+      "layer": 0,
+      "start": [
+        159280,
+        -128900
+      ],
+      "end": [
+        159280,
+        -128766
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "output",
+      "layer": 0,
+      "start": [
+        157350,
+        -128150
+      ],
+      "end": [
+        157100,
+        -127900
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "output",
+      "layer": 0,
+      "start": [
+        160530,
+        -127500
+      ],
+      "end": [
+        160530,
+        -127630
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "output",
+      "layer": 0,
+      "start": [
+        160530,
+        -127630
+      ],
+      "end": [
+        159260,
+        -128900
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "output",
+      "layer": 0,
+      "start": [
+        159280,
+        -128766
+      ],
+      "end": [
+        158664,
+        -128150
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "output",
+      "layer": 0,
+      "start": [
+        159260,
+        -128900
+      ],
+      "end": [
+        159280,
+        -128900
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "output",
+      "layer": 1,
+      "start": [
+        161300,
+        -124070
+      ],
+      "end": [
+        160530,
+        -123300
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "output",
+      "layer": 1,
+      "start": [
+        160530,
+        -127500
+      ],
+      "end": [
+        161300,
+        -126730
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "output",
+      "layer": 1,
+      "start": [
+        161300,
+        -126730
+      ],
+      "end": [
+        161300,
+        -124070
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "MISO",
+      "layer": 0,
+      "start": [
+        156300,
+        -128870
+      ],
+      "end": [
+        156270,
+        -128900
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "MISO",
+      "layer": 0,
+      "start": [
+        156300,
+        -127300
+      ],
+      "end": [
+        156300,
+        -128870
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        137400,
+        -118200
+      ],
+      "end": [
+        137400,
+        -119200
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        143353,
+        -122000
+      ],
+      "end": [
+        143570,
+        -122000
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        134070,
+        -118810
+      ],
+      "end": [
+        132920,
+        -118810
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        143570,
+        -119880
+      ],
+      "end": [
+        144100,
+        -119350
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        136211,
+        -117011
+      ],
+      "end": [
+        137400,
+        -118200
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        143171,
+        -129471
+      ],
+      "end": [
+        142700,
+        -129000
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        133035,
+        -118925
+      ],
+      "end": [
+        132920,
+        -119040
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        133289,
+        -117011
+      ],
+      "end": [
+        136211,
+        -117011
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        143570,
+        -122000
+      ],
+      "end": [
+        143570,
+        -120800
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        157029,
+        -129471
+      ],
+      "end": [
+        143171,
+        -129471
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        147200,
+        -120000
+      ],
+      "end": [
+        145650,
+        -120000
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        133035,
+        -117732
+      ],
+      "end": [
+        133035,
+        -118925
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        157130,
+        -129370
+      ],
+      "end": [
+        157029,
+        -129471
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        139000,
+        -120800
+      ],
+      "end": [
+        143570,
+        -120800
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        143570,
+        -120800
+      ],
+      "end": [
+        143570,
+        -119880
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        133035,
+        -117265
+      ],
+      "end": [
+        133289,
+        -117011
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        142700,
+        -129000
+      ],
+      "end": [
+        142700,
+        -122653
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        144700,
+        -119950
+      ],
+      "end": [
+        144100,
+        -119350
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        145650,
+        -120000
+      ],
+      "end": [
+        145600,
+        -119950
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        157130,
+        -128900
+      ],
+      "end": [
+        157130,
+        -129370
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        142700,
+        -122653
+      ],
+      "end": [
+        143353,
+        -122000
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        157130,
+        -128900
+      ],
+      "end": [
+        158420,
+        -128900
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        132920,
+        -118810
+      ],
+      "end": [
+        132920,
+        -119040
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        145600,
+        -119950
+      ],
+      "end": [
+        144700,
+        -119950
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        133035,
+        -117732
+      ],
+      "end": [
+        133035,
+        -117265
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power-hv",
+      "layer": 0,
+      "start": [
+        137400,
+        -119200
+      ],
+      "end": [
+        139000,
+        -120800
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "N_TRST",
+      "layer": 0,
+      "start": [
+        146300,
+        -124000
+      ],
+      "end": [
+        147200,
+        -124000
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "N_TRST",
+      "layer": 0,
+      "start": [
+        145670,
+        -127500
+      ],
+      "end": [
+        145670,
+        -123300
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "N_TRST",
+      "layer": 0,
+      "start": [
+        144500,
+        -122000
+      ],
+      "end": [
+        145670,
+        -123170
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "N_TRST",
+      "layer": 0,
+      "start": [
+        144430,
+        -122000
+      ],
+      "end": [
+        144500,
+        -122000
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "N_TRST",
+      "layer": 0,
+      "start": [
+        145670,
+        -123170
+      ],
+      "end": [
+        145670,
+        -123300
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "N_TRST",
+      "layer": 0,
+      "start": [
+        145670,
+        -123370
+      ],
+      "end": [
+        146300,
+        -124000
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "N_TRST",
+      "layer": 0,
+      "start": [
+        145670,
+        -123300
+      ],
+      "end": [
+        145670,
+        -123370
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 0,
+      "start": [
+        135700,
+        -128150
+      ],
+      "end": [
+        135700,
+        -129300
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 0,
+      "start": [
+        158048,
+        -134070
+      ],
+      "end": [
+        161725,
+        -130393
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 0,
+      "start": [
+        159600,
+        -124800
+      ],
+      "end": [
+        159000,
+        -124800
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 0,
+      "start": [
+        135500,
+        -129500
+      ],
+      "end": [
+        135500,
+        -130370
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 0,
+      "start": [
+        134750,
+        -129250
+      ],
+      "end": [
+        135250,
+        -129250
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 0,
+      "start": [
+        134500,
+        -129500
+      ],
+      "end": [
+        134750,
+        -129250
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 0,
+      "start": [
+        161725,
+        -125907
+      ],
+      "end": [
+        160793,
+        -124975
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 0,
+      "start": [
+        160793,
+        -124975
+      ],
+      "end": [
+        159775,
+        -124975
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 0,
+      "start": [
+        141721,
+        -134279
+      ],
+      "end": [
+        141930,
+        -134070
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 0,
+      "start": [
+        134500,
+        -130370
+      ],
+      "end": [
+        134500,
+        -129500
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 0,
+      "start": [
+        135700,
+        -128150
+      ],
+      "end": [
+        135700,
+        -125850
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 0,
+      "start": [
+        159775,
+        -124975
+      ],
+      "end": [
+        159600,
+        -124800
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 0,
+      "start": [
+        161725,
+        -130393
+      ],
+      "end": [
+        161725,
+        -125907
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 0,
+      "start": [
+        135700,
+        -127000
+      ],
+      "end": [
+        135700,
+        -125850
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 0,
+      "start": [
+        135700,
+        -129300
+      ],
+      "end": [
+        135500,
+        -129500
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 0,
+      "start": [
+        135250,
+        -129250
+      ],
+      "end": [
+        135500,
+        -129500
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 0,
+      "start": [
+        141930,
+        -134070
+      ],
+      "end": [
+        158048,
+        -134070
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 1,
+      "start": [
+        142975,
+        -130157
+      ],
+      "end": [
+        140993,
+        -128175
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 1,
+      "start": [
+        137007,
+        -128875
+      ],
+      "end": [
+        135293,
+        -128875
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 1,
+      "start": [
+        141721,
+        -134279
+      ],
+      "end": [
+        141930,
+        -134070
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 1,
+      "start": [
+        142975,
+        -133421
+      ],
+      "end": [
+        142975,
+        -130157
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 1,
+      "start": [
+        134975,
+        -127725
+      ],
+      "end": [
+        135700,
+        -127000
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 1,
+      "start": [
+        140993,
+        -128175
+      ],
+      "end": [
+        137707,
+        -128175
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 1,
+      "start": [
+        137707,
+        -128175
+      ],
+      "end": [
+        137007,
+        -128875
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 1,
+      "start": [
+        135293,
+        -128875
+      ],
+      "end": [
+        134975,
+        -128557
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 1,
+      "start": [
+        134975,
+        -128557
+      ],
+      "end": [
+        134975,
+        -127725
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 1,
+      "start": [
+        142326,
+        -134070
+      ],
+      "end": [
+        142975,
+        -133421
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_P",
+      "layer": 1,
+      "start": [
+        141930,
+        -134070
+      ],
+      "end": [
+        142326,
+        -134070
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        159600,
+        -125600
+      ],
+      "end": [
+        159000,
+        -125600
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        133800,
+        -127000
+      ],
+      "end": [
+        133800,
+        -125850
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        133800,
+        -128150
+      ],
+      "end": [
+        133800,
+        -125850
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        134000,
+        -130370
+      ],
+      "end": [
+        134000,
+        -129250
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        134000,
+        -129250
+      ],
+      "end": [
+        133800,
+        -129050
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        135000,
+        -131250
+      ],
+      "end": [
+        135000,
+        -130370
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        159775,
+        -125425
+      ],
+      "end": [
+        159600,
+        -125600
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        134250,
+        -131500
+      ],
+      "end": [
+        134750,
+        -131500
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        160607,
+        -125425
+      ],
+      "end": [
+        159775,
+        -125425
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        161275,
+        -126093
+      ],
+      "end": [
+        160607,
+        -125425
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        134000,
+        -131250
+      ],
+      "end": [
+        134250,
+        -131500
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        141750,
+        -133440
+      ],
+      "end": [
+        141930,
+        -133620
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        134750,
+        -131500
+      ],
+      "end": [
+        135000,
+        -131250
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        157862,
+        -133620
+      ],
+      "end": [
+        161275,
+        -130207
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        133800,
+        -129050
+      ],
+      "end": [
+        133800,
+        -128150
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        134000,
+        -130370
+      ],
+      "end": [
+        134000,
+        -131250
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        141930,
+        -133620
+      ],
+      "end": [
+        157862,
+        -133620
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 0,
+      "start": [
+        161275,
+        -130207
+      ],
+      "end": [
+        161275,
+        -126093
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 1,
+      "start": [
+        142140,
+        -133620
+      ],
+      "end": [
+        142525,
+        -133235
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 1,
+      "start": [
+        134525,
+        -128743
+      ],
+      "end": [
+        134525,
+        -127725
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 1,
+      "start": [
+        137193,
+        -129325
+      ],
+      "end": [
+        135107,
+        -129325
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 1,
+      "start": [
+        140807,
+        -128625
+      ],
+      "end": [
+        137893,
+        -128625
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 1,
+      "start": [
+        137893,
+        -128625
+      ],
+      "end": [
+        137193,
+        -129325
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 1,
+      "start": [
+        141750,
+        -133440
+      ],
+      "end": [
+        141930,
+        -133620
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 1,
+      "start": [
+        142525,
+        -133235
+      ],
+      "end": [
+        142525,
+        -130343
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 1,
+      "start": [
+        142525,
+        -130343
+      ],
+      "end": [
+        140807,
+        -128625
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 1,
+      "start": [
+        141930,
+        -133620
+      ],
+      "end": [
+        142140,
+        -133620
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 1,
+      "start": [
+        134525,
+        -127725
+      ],
+      "end": [
+        133800,
+        -127000
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "DATA_N",
+      "layer": 1,
+      "start": [
+        135107,
+        -129325
+      ],
+      "end": [
+        134525,
+        -128743
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "hv",
+      "layer": 0,
+      "start": [
+        137340,
+        -124410
+      ],
+      "end": [
+        137340,
+        -121220
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "hv",
+      "layer": 0,
+      "start": [
+        136130,
+        -120110
+      ],
+      "end": [
+        136580,
+        -120110
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "hv",
+      "layer": 0,
+      "start": [
+        136580,
+        -120110
+      ],
+      "end": [
+        136820,
+        -119870
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "hv",
+      "layer": 0,
+      "start": [
+        136560,
+        -118810
+      ],
+      "end": [
+        136820,
+        -119070
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "hv",
+      "layer": 0,
+      "start": [
+        137340,
+        -120790
+      ],
+      "end": [
+        136660,
+        -120110
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "hv",
+      "layer": 0,
+      "start": [
+        134750,
+        -124750
+      ],
+      "end": [
+        134750,
+        -125850
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "hv",
+      "layer": 0,
+      "start": [
+        136660,
+        -120110
+      ],
+      "end": [
+        136580,
+        -120110
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "hv",
+      "layer": 0,
+      "start": [
+        137000,
+        -125700
+      ],
+      "end": [
+        137000,
+        -124750
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "hv",
+      "layer": 0,
+      "start": [
+        136130,
+        -118810
+      ],
+      "end": [
+        136560,
+        -118810
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "hv",
+      "layer": 0,
+      "start": [
+        136820,
+        -119870
+      ],
+      "end": [
+        136820,
+        -119070
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "hv",
+      "layer": 0,
+      "start": [
+        130750,
+        -124500
+      ],
+      "end": [
+        130750,
+        -126110
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "hv",
+      "layer": 0,
+      "start": [
+        137000,
+        -124750
+      ],
+      "end": [
+        137340,
+        -124410
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "hv",
+      "layer": 0,
+      "start": [
+        137340,
+        -121220
+      ],
+      "end": [
+        137340,
+        -120790
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "hv",
+      "layer": 1,
+      "start": [
+        134750,
+        -124750
+      ],
+      "end": [
+        131000,
+        -124750
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "hv",
+      "layer": 1,
+      "start": [
+        134750,
+        -124750
+      ],
+      "end": [
+        137000,
+        -124750
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "hv",
+      "layer": 1,
+      "start": [
+        131000,
+        -124750
+      ],
+      "end": [
+        130750,
+        -124500
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "10",
+      "layer": 0,
+      "start": [
+        136500,
+        -129180
+      ],
+      "end": [
+        136500,
+        -130370
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "10",
+      "layer": 0,
+      "start": [
+        138250,
+        -127430
+      ],
+      "end": [
+        136500,
+        -129180
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "4",
+      "layer": 0,
+      "start": [
+        132500,
+        -127430
+      ],
+      "end": [
+        132500,
+        -128317
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "4",
+      "layer": 0,
+      "start": [
+        133500,
+        -129317
+      ],
+      "end": [
+        133500,
+        -130370
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "4",
+      "layer": 0,
+      "start": [
+        132500,
+        -128317
+      ],
+      "end": [
+        133500,
+        -129317
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power_vbus-hv",
+      "layer": 0,
+      "start": [
+        132350,
+        -130370
+      ],
+      "end": [
+        132350,
+        -130949
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power_vbus-hv",
+      "layer": 0,
+      "start": [
+        137150,
+        -130370
+      ],
+      "end": [
+        137150,
+        -130949
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power_vbus-hv",
+      "layer": 0,
+      "start": [
+        133750,
+        -132500
+      ],
+      "end": [
+        135750,
+        -132500
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power_vbus-hv",
+      "layer": 0,
+      "start": [
+        137150,
+        -130949
+      ],
+      "end": [
+        136750,
+        -131349
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power_vbus-hv",
+      "layer": 0,
+      "start": [
+        136750,
+        -131500
+      ],
+      "end": [
+        135750,
+        -132500
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power_vbus-hv",
+      "layer": 0,
+      "start": [
+        132750,
+        -131349
+      ],
+      "end": [
+        132750,
+        -131500
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power_vbus-hv",
+      "layer": 0,
+      "start": [
+        132350,
+        -129100
+      ],
+      "end": [
+        131640,
+        -128390
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power_vbus-hv",
+      "layer": 0,
+      "start": [
+        136750,
+        -131349
+      ],
+      "end": [
+        136750,
+        -131500
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power_vbus-hv",
+      "layer": 0,
+      "start": [
+        132350,
+        -130370
+      ],
+      "end": [
+        132350,
+        -129100
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power_vbus-hv",
+      "layer": 0,
+      "start": [
+        131640,
+        -128390
+      ],
+      "end": [
+        130750,
+        -128390
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power_vbus-hv",
+      "layer": 0,
+      "start": [
+        132750,
+        -131500
+      ],
+      "end": [
+        133750,
+        -132500
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "power_vbus-hv",
+      "layer": 0,
+      "start": [
+        132350,
+        -130949
+      ],
+      "end": [
+        132750,
+        -131349
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        159250,
+        -127350
+      ],
+      "end": [
+        160300,
+        -126300
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        135100,
+        -117855
+      ],
+      "end": [
+        135100,
+        -119460
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        138520,
+        -130370
+      ],
+      "end": [
+        139070,
+        -130920
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        159050,
+        -127350
+      ],
+      "end": [
+        159250,
+        -127350
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        147150,
+        -126450
+      ],
+      "end": [
+        147200,
+        -126400
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        135100,
+        -119460
+      ],
+      "end": [
+        135100,
+        -120540
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        131550,
+        -130370
+      ],
+      "end": [
+        130980,
+        -130370
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        134420,
+        -121220
+      ],
+      "end": [
+        134670,
+        -120970
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        134070,
+        -120110
+      ],
+      "end": [
+        134070,
+        -120370
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        134920,
+        -121220
+      ],
+      "end": [
+        134670,
+        -120970
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        134135,
+        -117732
+      ],
+      "end": [
+        134977,
+        -117732
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        147150,
+        -127350
+      ],
+      "end": [
+        147150,
+        -126450
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        136240,
+        -121220
+      ],
+      "end": [
+        134920,
+        -121220
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        151120,
+        -120420
+      ],
+      "end": [
+        150300,
+        -119600
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        137950,
+        -130370
+      ],
+      "end": [
+        138520,
+        -130370
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        130980,
+        -130370
+      ],
+      "end": [
+        130430,
+        -130920
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        162670,
+        -127500
+      ],
+      "end": [
+        162670,
+        -123300
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        134750,
+        -127000
+      ],
+      "end": [
+        134750,
+        -128150
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        134070,
+        -120370
+      ],
+      "end": [
+        134670,
+        -120970
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        134977,
+        -117732
+      ],
+      "end": [
+        135022,
+        -117776
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        135100,
+        -120540
+      ],
+      "end": [
+        134670,
+        -120970
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        133780,
+        -121220
+      ],
+      "end": [
+        134420,
+        -121220
+      ],
+      "width": 200,
+      "type": "segment"
+    },
+    {
+      "netId": "lv",
+      "layer": 0,
+      "start": [
+        135022,
+        -117776
+      ],
+      "end": [
+        135100,
+        -117855
+      ],
+      "width": 200,
+      "type": "segment"
+    }
+  ],
+  "vias": [
+    {
+      "netId": "",
+      "position": [
+        135500,
+        -131650
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "",
+      "position": [
+        136750,
+        -127875
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "output",
+      "position": [
+        160530,
+        -127500
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "output",
+      "position": [
+        160530,
+        -123300
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "DATA_P",
+      "position": [
+        141721,
+        -134279
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "DATA_P",
+      "position": [
+        135700,
+        -127000
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "DATA_N",
+      "position": [
+        141750,
+        -133440
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "DATA_N",
+      "position": [
+        133800,
+        -127000
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "hv",
+      "position": [
+        134750,
+        -124750
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "hv",
+      "position": [
+        130750,
+        -124500
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "hv",
+      "position": [
+        137000,
+        -124750
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "lv",
+      "position": [
+        144600,
+        -125400
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "lv",
+      "position": [
+        142700,
+        -117900
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "lv",
+      "position": [
+        162800,
+        -121800
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "lv",
+      "position": [
+        134750,
+        -127000
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "lv",
+      "position": [
+        147200,
+        -128800
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "lv",
+      "position": [
+        160300,
+        -126300
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "lv",
+      "position": [
+        149800,
+        -128800
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "lv",
+      "position": [
+        160400,
+        -117500
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "lv",
+      "position": [
+        134670,
+        -120970
+      ],
+      "padstack": "Padstack_18"
+    },
+    {
+      "netId": "lv",
+      "position": [
+        135022,
+        -117776
+      ],
+      "padstack": "Padstack_18"
+    }
+  ],
+  "viaDefinitions": [
+    "Padstack_18"
+  ],
+  "netPreferences": [],
+  "differentialPairs": [],
+  "rules": [
+    {
+      "type": "rotateFirst",
+      "value": false,
+      "subjects": []
+    },
+    {
+      "type": "allowViaAtSmd",
+      "value": false,
+      "subjects": []
+    },
+    {
+      "type": "allow90Degrees",
+      "value": false,
+      "subjects": []
+    },
+    {
+      "type": "pinConnectionPoint",
+      "value": "centroid",
+      "subjects": []
+    }
+  ]
+}

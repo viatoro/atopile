@@ -2,7 +2,7 @@ const std = @import("std");
 
 pub const PyiGenerator = struct {
     allocator: std.mem.Allocator,
-    output: std.array_list.Managed(u8),
+    output: std.Io.Writer.Allocating,
 
     const Self = @This();
 
@@ -33,7 +33,7 @@ pub const PyiGenerator = struct {
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .allocator = allocator,
-            .output = std.array_list.Managed(u8).init(allocator),
+            .output = .init(allocator),
         };
     }
 
@@ -55,20 +55,20 @@ pub const PyiGenerator = struct {
 
                 if (!emitted_param) {
                     if (has_existing) {
-                        try self.output.writer().print(", *, ", .{});
+                        try self.output.writer.print(", *, ", .{});
                     } else {
-                        try self.output.writer().print("*, ", .{});
+                        try self.output.writer.print("*, ", .{});
                     }
                     emitted_param = true;
                 } else {
-                    try self.output.writer().print(", ", .{});
+                    try self.output.writer.print(", ", .{});
                 }
 
                 const param_index = if (skip_first) i - 1 else i;
                 const param_name = std.fmt.comptimePrint("arg_{d}", .{param_index});
-                try writeIdentifier(self.output.writer(), param_name);
-                try self.output.writer().writeAll(": ");
-                try self.writeZigTypeToPython(self.output.writer(), param_type);
+                try writeIdentifier(&self.output.writer, param_name);
+                try self.output.writer.writeAll(": ");
+                try self.writeZigTypeToPython(&self.output.writer, param_type);
             }
         }
     }
@@ -198,36 +198,36 @@ pub const PyiGenerator = struct {
 
         // Generate as IntEnum for i32-backed enums, StrEnum for others
         if (is_i32_backed) {
-            try self.output.writer().print("class {s}(IntEnum):\n", .{clean_name});
+            try self.output.writer.print("class {s}(IntEnum):\n", .{clean_name});
         } else {
-            try self.output.writer().print("class {s}(str, Enum):\n", .{clean_name});
+            try self.output.writer.print("class {s}(str, Enum):\n", .{clean_name});
         }
 
         inline for (enum_info.fields) |field| {
             // Convert field name to valid Python identifier
-            try self.output.writer().print("    ", .{});
+            try self.output.writer.print("    ", .{});
 
             // Handle field names - replace spaces/hyphens with underscores
             // and convert to uppercase
             for (field.name) |c| {
                 if (c >= 'a' and c <= 'z') {
-                    try self.output.writer().print("{c}", .{c - 32}); // Convert to uppercase
+                    try self.output.writer.print("{c}", .{c - 32}); // Convert to uppercase
                 } else if (c >= 'A' and c <= 'Z' or c >= '0' and c <= '9' or c == '_') {
-                    try self.output.writer().print("{c}", .{c}); // Keep as is
+                    try self.output.writer.print("{c}", .{c}); // Keep as is
                 } else {
                     // Replace any other character (spaces, hyphens, etc) with underscore
-                    try self.output.writer().print("_", .{});
+                    try self.output.writer.print("_", .{});
                 }
             }
 
             // Use integer value for IntEnum, string name for StrEnum
             if (is_i32_backed) {
-                try self.output.writer().print(" = {d}\n", .{field.value});
+                try self.output.writer.print(" = {d}\n", .{field.value});
             } else {
-                try self.output.writer().print(" = \"{s}\"\n", .{field.name});
+                try self.output.writer.print(" = \"{s}\"\n", .{field.name});
             }
         }
-        try self.output.writer().print("\n", .{});
+        try self.output.writer.print("\n", .{});
     }
 
     fn generateStructDefinition(self: *Self, comptime T: type) !void {
@@ -243,34 +243,34 @@ pub const PyiGenerator = struct {
         else
             class_name;
 
-        try self.output.writer().print("class {s}:\n", .{clean_name});
+        try self.output.writer.print("class {s}:\n", .{clean_name});
 
         // Generate field annotations
         inline for (struct_info.fields) |field| {
-            try self.output.writer().print("    {s}: ", .{field.name});
-            try self.writeZigTypeToPython(self.output.writer(), field.type);
-            try self.output.writer().print("\n", .{});
+            try self.output.writer.print("    {s}: ", .{field.name});
+            try self.writeZigTypeToPython(&self.output.writer, field.type);
+            try self.output.writer.print("\n", .{});
         }
 
-        try self.output.writer().print("\n", .{});
+        try self.output.writer.print("\n", .{});
 
         // Generate __init__ method
-        try self.output.writer().print("    def __init__(self", .{});
+        try self.output.writer.print("    def __init__(self", .{});
         if (struct_info.fields.len > 0) {
-            try self.output.writer().print(", *", .{});
+            try self.output.writer.print(", *", .{});
         }
         inline for (struct_info.fields) |field| {
-            try self.output.writer().print(", {s}: ", .{field.name});
-            try self.writeZigTypeToPython(self.output.writer(), field.type);
+            try self.output.writer.print(", {s}: ", .{field.name});
+            try self.writeZigTypeToPython(&self.output.writer, field.type);
         }
-        try self.output.writer().print(") -> None: ...\n", .{});
+        try self.output.writer.print(") -> None: ...\n", .{});
 
         // Generate __repr__ method
-        try self.output.writer().print("    def __repr__(self) -> str: ...\n", .{});
+        try self.output.writer.print("    def __repr__(self) -> str: ...\n", .{});
 
-        try self.output.writer().print("    @staticmethod\n", .{});
-        try self.output.writer().print("    def __field_names__() -> list[str]: ...\n", .{});
-        try self.output.writer().print("    def __zig_address__(self) -> int: ...\n", .{});
+        try self.output.writer.print("    @staticmethod\n", .{});
+        try self.output.writer.print("    def __field_names__() -> list[str]: ...\n", .{});
+        try self.output.writer.print("    def __zig_address__(self) -> int: ...\n", .{});
 
         // Generate methods
         inline for (struct_info.decls) |decl| {
@@ -290,26 +290,26 @@ pub const PyiGenerator = struct {
                         };
 
                         if (is_method) {
-                            try self.output.writer().print("    def {s}(self", .{decl.name});
+                            try self.output.writer.print("    def {s}(self", .{decl.name});
                             try self.generateFunctionParameters(fn_info, true, true); // Skip first param (self)
-                            try self.output.writer().print(") -> ", .{});
+                            try self.output.writer.print(") -> ", .{});
                             if (fn_info.return_type) |ret_type| {
-                                try self.writeZigTypeToPython(self.output.writer(), ret_type);
+                                try self.writeZigTypeToPython(&self.output.writer, ret_type);
                             } else {
-                                try self.output.writer().print("None", .{});
+                                try self.output.writer.print("None", .{});
                             }
-                            try self.output.writer().print(": ...\n", .{});
+                            try self.output.writer.print(": ...\n", .{});
                         } else {
-                            try self.output.writer().print("    @staticmethod\n", .{});
-                            try self.output.writer().print("    def {s}(", .{decl.name});
+                            try self.output.writer.print("    @staticmethod\n", .{});
+                            try self.output.writer.print("    def {s}(", .{decl.name});
                             try self.generateFunctionParameters(fn_info, false, false);
-                            try self.output.writer().print(") -> ", .{});
+                            try self.output.writer.print(") -> ", .{});
                             if (fn_info.return_type) |ret_type| {
-                                try self.writeZigTypeToPython(self.output.writer(), ret_type);
+                                try self.writeZigTypeToPython(&self.output.writer, ret_type);
                             } else {
-                                try self.output.writer().print("None", .{});
+                                try self.output.writer.print("None", .{});
                             }
-                            try self.output.writer().print(": ...\n", .{});
+                            try self.output.writer.print(": ...\n", .{});
                         }
                     },
                     else => {},
@@ -317,7 +317,7 @@ pub const PyiGenerator = struct {
             }
         }
 
-        try self.output.writer().print("\n", .{});
+        try self.output.writer.print("\n", .{});
     }
 
     fn generateFunctionDefinitions(self: *Self, comptime T: type) !void {
@@ -347,15 +347,15 @@ pub const PyiGenerator = struct {
                                 };
 
                                 if (is_standalone_fn) {
-                                    try self.output.writer().print("def {s}(", .{decl.name});
+                                    try self.output.writer.print("def {s}(", .{decl.name});
                                     try self.generateFunctionParameters(fn_info, false, false); // Don't skip any params
-                                    try self.output.writer().print(") -> ", .{});
+                                    try self.output.writer.print(") -> ", .{});
                                     if (fn_info.return_type) |ret_type| {
-                                        try self.writeZigTypeToPython(self.output.writer(), ret_type);
+                                        try self.writeZigTypeToPython(&self.output.writer, ret_type);
                                     } else {
-                                        try self.output.writer().print("None", .{});
+                                        try self.output.writer.print("None", .{});
                                     }
-                                    try self.output.writer().print(": ...\n", .{});
+                                    try self.output.writer.print(": ...\n", .{});
                                 }
                             },
                             else => {},
@@ -369,11 +369,11 @@ pub const PyiGenerator = struct {
 
     pub fn generate(self: *Self, comptime T: type) ![]const u8 {
         //header
-        try self.output.writer().print("from typing import Any  # noqa: F401\n", .{});
-        try self.output.writer().print("from enum import Enum, IntEnum  # noqa: F401\n\n", .{});
+        try self.output.writer.print("from typing import Any  # noqa: F401\n", .{});
+        try self.output.writer.print("from enum import Enum, IntEnum  # noqa: F401\n\n", .{});
 
-        try self.output.writer().print("# Dirty hack to not error in ruff check\n", .{});
-        try self.output.writer().print("type Allocator = Any\n\n", .{});
+        try self.output.writer.print("# Dirty hack to not error in ruff check\n", .{});
+        try self.output.writer.print("type Allocator = Any\n\n", .{});
 
         // First generate enum definitions
         const root_type_info = @typeInfo(T);
@@ -441,21 +441,19 @@ pub const PyiGenerator = struct {
         return self.output.toOwnedSlice();
     }
 
-    pub fn manualModuleStub(allocator: std.mem.Allocator, comptime name: []const u8, comptime T: type, output_dir: []const u8, source_dir: []const u8) !void {
+    pub fn manualModuleStub(allocator: std.mem.Allocator, io: std.Io, comptime name: []const u8, comptime T: type, output_dir: []const u8, source_dir: []const u8) !void {
         _ = T;
         const manual_dir = try std.fs.path.join(allocator, &.{ source_dir, "manual" });
         defer allocator.free(manual_dir);
         const manual_file_path = try std.fs.path.join(allocator, &.{ manual_dir, name ++ ".pyi" });
         defer allocator.free(manual_file_path);
-        const manual_file = try std.fs.cwd().openFile(manual_file_path, .{});
-        defer manual_file.close();
-        const manual_content = try manual_file.readToEndAlloc(allocator, 1024 * 1024);
+        const manual_content = try std.Io.Dir.cwd().readFileAlloc(io, manual_file_path, allocator, .limited(1024 * 1024));
         defer allocator.free(manual_content);
         var path_buf: [256]u8 = undefined;
         const file_path = try std.fmt.bufPrint(&path_buf, "{s}/{s}.pyi", .{ output_dir, name });
-        const file = try std.fs.cwd().createFile(file_path, .{});
-        defer file.close();
-        try file.writeAll(manual_content);
-        try file.writeAll("\n");
+        const file = try std.Io.Dir.cwd().createFile(io, file_path, .{});
+        defer file.close(io);
+        try file.writeStreamingAll(io, manual_content);
+        try file.writeStreamingAll(io, "\n");
     }
 };

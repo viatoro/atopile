@@ -2,8 +2,12 @@
 # SPDX-License-Identifier: MIT
 
 import logging
+import os
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import shutil
+from collections.abc import Generator
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 
 from httpx import HTTPStatusError, RequestError, TimeoutException
@@ -16,6 +20,19 @@ from faebryk.libs.http import http_client
 from faebryk.libs.util import Advancable
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _DownloadState:
+    """Internal state for background datasheet downloads."""
+
+    cache_dir: Path
+    futures: dict[str, Future]
+    executor: ThreadPoolExecutor
+
+
+_pending_downloads: _DownloadState | None = None
+
 
 # Maximum characters for the joined module names in the filename
 # (excluding .pdf extension)
@@ -184,6 +201,146 @@ def _download_datasheet(url: str, path: Path):
         raise DatasheetDownloadException(
             f"Failed to save datasheet to {path}: {e}"
         ) from e
+
+
+def _iter_part_datasheets() -> Generator[tuple[Path, str], None, None]:
+    """Iterate part directories and yield (part_dir, datasheet_url) pairs.
+
+    Uses AtoCodeParse to extract has_datasheet trait from .ato files,
+    following the same directory iteration pattern as PartLifecycle.Library.
+    """
+    from atopile.config import config
+    from faebryk.libs.codegen.atocodeparse import AtoCodeParse
+
+    parts_dir = config.project.paths.parts
+    if not parts_dir.is_dir():
+        return
+    for part_dir in sorted(parts_dir.iterdir(), key=lambda x: x.name):
+        if not part_dir.is_dir():
+            continue
+        ato_path = part_dir / (part_dir.name + ".ato")
+        if not ato_path.is_file():
+            continue
+        try:
+            ato = AtoCodeParse.ComponentFile(ato_path)
+            _, args = ato.parse_trait("has_datasheet")
+            url = args.get("datasheet")
+            if url:
+                yield part_dir, url
+        except AtoCodeParse.TraitNotFound:
+            continue
+
+
+def start_datasheet_downloads(app: fabll.Node) -> None:
+    """Kick off background datasheet downloads into build/cache.
+
+    Stores state internally; call finalize_datasheet_downloads() later
+    to wait for completion and copy files into part directories.
+    """
+    global _pending_downloads
+
+    from atopile.config import config
+
+    if os.environ.get("CI"):
+        logger.info("Skipping datasheet downloads in CI")
+        return
+
+    # Collect unique datasheet URLs from the live graph
+    urls: set[str] = set()
+    for m in fabll.Traits.get_implementor_objects(
+        F.has_datasheet.bind_typegraph(tg=app.tg)
+    ):
+        datasheet_trait = m.try_get_trait(F.has_datasheet)
+        if datasheet_trait is None:
+            continue
+        url = datasheet_trait.get_datasheet()
+        if url:
+            urls.add(url)
+
+    if not urls:
+        logger.info("No datasheets to download")
+        return
+
+    cache_dir = config.project.paths.build / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # Seed cache from PDFs already present in part directories
+    for part_dir, url in _iter_part_datasheets():
+        filename = _extract_filename_from_url(url)
+        src = part_dir / filename
+        dest = cache_dir / filename
+        if src.exists() and not dest.exists():
+            shutil.copy2(src, dest)
+
+    executor = ThreadPoolExecutor(max_workers=8)
+    futures: dict[str, Future] = {}
+    for url in urls:
+        filename = _extract_filename_from_url(url)
+        cache_path = cache_dir / filename
+        if cache_path.exists():
+            continue
+        futures[url] = executor.submit(_download_datasheet, url, cache_path)
+
+    if futures:
+        logger.info(
+            f"Starting background download of {len(futures)} datasheets "
+            f"({len(urls) - len(futures)} already cached)"
+        )
+    else:
+        logger.info(f"All {len(urls)} datasheets already cached")
+
+    _pending_downloads = _DownloadState(
+        cache_dir=cache_dir,
+        futures=futures,
+        executor=executor,
+    )
+
+
+def finalize_datasheet_downloads() -> None:
+    """Wait for background datasheet downloads and copy into part directories."""
+    global _pending_downloads
+
+    state = _pending_downloads
+    _pending_downloads = None
+
+    if state is None:
+        return
+
+    try:
+        # Wait for in-flight downloads
+        downloaded = 0
+        failed = 0
+        for url, future in state.futures.items():
+            try:
+                future.result()
+                downloaded += 1
+            except DatasheetDownloadException as e:
+                logger.error(f"Failed to download datasheet from {url}: {e}")
+                failed += 1
+            except Exception as e:
+                logger.error(f"Unexpected error downloading {url}: {e}")
+                failed += 1
+
+        # Copy cached datasheets into part directories
+        copied = 0
+        for part_dir, url in _iter_part_datasheets():
+            filename = _extract_filename_from_url(url)
+            cache_path = state.cache_dir / filename
+            if not cache_path.exists():
+                continue
+            dest = part_dir / filename
+            if dest.exists():
+                continue
+            shutil.copy2(cache_path, dest)
+            logger.info(f"Copied datasheet to {dest}")
+            copied += 1
+
+        logger.info(
+            f"Datasheets: {downloaded} downloaded, {copied} copied to parts, "
+            f"{failed} failed"
+        )
+    finally:
+        state.executor.shutdown(wait=False)
 
 
 def _create_app_with_datasheet(url: str):

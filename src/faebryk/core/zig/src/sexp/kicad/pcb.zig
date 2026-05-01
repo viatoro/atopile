@@ -215,10 +215,10 @@ pub const E_pad_property = enum {
 
 // Pad chamfer enum
 pub const E_pad_chamfer = enum {
-    chamfer_top_left,
-    chamfer_top_right,
-    chamfer_bottom_left,
-    chamfer_bottom_right,
+    top_left,
+    top_right,
+    bottom_left,
+    bottom_right,
 };
 
 // Pad drill shape enum
@@ -565,6 +565,8 @@ pub const Pad = struct {
     layers: list(str) = .{},
     remove_unused_layers: ?bool = null,
     net: ?Net = null,
+    pinfunction: ?str = null,
+    pintype: ?str = null,
     solder_mask_margin: ?f64 = null,
     solder_paste_margin: ?f64 = null,
     solder_paste_margin_ratio: ?f64 = null,
@@ -574,7 +576,7 @@ pub const Pad = struct {
     thermal_gap: ?f64 = null,
     roundrect_rratio: ?f64 = null,
     chamfer_ratio: ?f64 = null,
-    chamfer: ?E_pad_chamfer = null,
+    chamfer: list(E_pad_chamfer) = .{},
     properties: ?E_pad_property = null,
     options: ?PadOptions = null,
     tenting: ?PadTenting = null,
@@ -604,9 +606,9 @@ pub const Net = struct {
 pub const Property = struct {
     name: str,
     value: str,
-    at: Xyr,
+    at: ?Xyr = null,
     unlocked: ?bool = null,
-    layer: str,
+    layer: ?str = null,
     hide: ?bool = null,
     uuid: ?str = null,
     effects: ?Effects = null,
@@ -641,6 +643,7 @@ pub const E_Attr = enum {
     exclude_from_pos_files,
     exclude_from_bom,
     allow_missing_courtyard,
+    allow_soldermask_bridges,
 };
 
 // Footprint structure
@@ -649,7 +652,11 @@ pub const Footprint = struct {
     layer: str = "F.Cu",
     uuid: ?str = null,
     at: Xyr,
+    description: ?str = null,
+    tags: list(str) = .{},
     path: ?str = null,
+    sheetname: ?str = null,
+    sheetfile: ?str = null,
     propertys: list(Property) = .{},
     attr: list(E_Attr) = .{},
     fp_lines: list(Line) = .{},
@@ -673,6 +680,7 @@ pub const Footprint = struct {
         .fp_poly = structure.SexpField{ .multidict = true },
         .pads = structure.SexpField{ .multidict = true, .sexp_name = "pad" },
         .models = structure.SexpField{ .multidict = true, .sexp_name = "model" },
+        .description = structure.SexpField{ .sexp_name = "descr" },
     };
 };
 
@@ -1013,7 +1021,7 @@ pub const E_tenting = enum {
 };
 pub const Setup = struct {
     stackup: ?Stackup = null,
-    pad_to_mask_clearance: i32 = 0,
+    pad_to_mask_clearance: f64 = 0,
     allow_soldermask_bridges_in_footprints: bool = false,
     tenting: list(E_tenting) = .{},
     pcbplotparams: PcbPlotParams = .{},

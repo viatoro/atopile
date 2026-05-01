@@ -98,6 +98,17 @@ class UnitNotFoundError(UnitException):
 class UnitExpressionError(UnitException): ...
 
 
+class UnitSerializationError(UnitException): ...
+
+
+class NoBaseUnitError(UnitException):
+    def __init__(self, unit: type):
+        self.unit = unit
+
+    def __str__(self) -> str:
+        return f"No base unit type for {self.unit.__name__}"
+
+
 @dataclass(frozen=True)
 class BasisVector(DataClassJsonMixin):
     ampere: int = field(default=0, metadata={"display_symbol": "A"})
@@ -308,73 +319,7 @@ class is_base_unit(fabll.Node):
     is_trait = fabll.Traits.MakeEdge(fabll.ImplementsTrait.MakeChild().put_on_type())
 
 
-class is_unit_type(fabll.Node):
-    is_trait = fabll.Traits.MakeEdge(fabll.ImplementsTrait.MakeChild().put_on_type())
-
-    symbol_ptr = F.Collections.Pointer.MakeChild()
-    basis_vector = F.Collections.Pointer.MakeChild()
-    multiplier_ptr = F.Collections.Pointer.MakeChild()
-    offset_ptr = F.Collections.Pointer.MakeChild()
-
-    @classmethod
-    def MakeChild(  # type: ignore[invalid-method-override]
-        cls,
-        symbols: tuple[str, ...],
-        basis_vector: BasisVector | None = None,
-        multiplier: float | None = None,
-        offset: float = 0.0,
-    ) -> fabll._ChildField[Self]:
-        out = fabll._ChildField(cls)
-
-        from faebryk.library.Literals import NumericInterval, Strings
-
-        symbol_field = Strings.MakeChild(*symbols)
-        out.add_dependant(symbol_field)
-
-        out.add_dependant(
-            F.Collections.Pointer.MakeEdge([out, cls.symbol_ptr], [symbol_field])
-        )
-
-        if multiplier:
-            multiplier_field = NumericInterval.MakeChild(min=multiplier, max=multiplier)
-            out.add_dependant(multiplier_field)
-            out.add_dependant(
-                F.Collections.Pointer.MakeEdge(
-                    [out, cls.multiplier_ptr], [multiplier_field]
-                )
-            )
-
-        offset_field = NumericInterval.MakeChild(min=offset, max=offset)
-        out.add_dependant(offset_field)
-        out.add_dependant(
-            F.Collections.Pointer.MakeEdge([out, cls.offset_ptr], [offset_field])
-        )
-
-        if basis_vector:
-            basis_vector_field = _BasisVector.MakeChild(basis_vector)
-            out.add_dependant(basis_vector_field)
-            out.add_dependant(
-                F.Collections.Pointer.MakeEdge(
-                    [out, cls.basis_vector], [basis_vector_field]
-                )
-            )
-
-        return out
-
-    def get_symbols(self) -> list[str]:
-        lit = self.symbol_ptr.get().deref().instance
-        assert lit is not None
-        from faebryk.library.Literals import Strings
-
-        lit = Strings.bind_instance(lit)
-        if lit is None:
-            return []
-        return lit.get_values()
-
-    def get_basis_vector(self) -> BasisVector:
-        return _BasisVector.bind_instance(
-            self.basis_vector.get().deref().instance
-        ).extract_vector()
+_IDENTITY = (1.0, 0.0)
 
 
 class is_unit(fabll.Node):
@@ -550,6 +495,9 @@ class is_unit(fabll.Node):
         return is_unit._extract_offset(self) != 0.0
 
     def is_commensurable_with(self: "is_unit | None", other: "is_unit|None") -> bool:
+        # Same node — trivially commensurable
+        if self is not None and other is not None and self.is_same(other):
+            return True
         self_vector = is_unit._extract_basis_vector(self)
         other_vector = is_unit._extract_basis_vector(other)
 
@@ -732,6 +680,10 @@ class is_unit(fabll.Node):
     def get_conversion_to(
         self: "is_unit | None", target: "is_unit|None"
     ) -> tuple[float, float]:
+        # Same node — identity conversion, skip basis vector extraction
+        if self is not None and target is not None and self.is_same(target):
+            return _IDENTITY
+
         if not is_unit.is_commensurable_with(self, target):
             raise UnitsNotCommensurableError(
                 f"Units {self} and {target} are not commensurable",
@@ -784,24 +736,13 @@ class is_unit(fabll.Node):
                     exp_mult = int(round(log_mult))
                     # Try to find base unit (multiplier=1.0) first
                     if base_symbol := _get_symbol_for_basis_vector(vector, 1.0):
-                        # Apply SI prefix
-                        prefixes = {
-                            -12: "p",
-                            -9: "n",
-                            -6: "µ",
-                            -3: "m",
-                            0: "",
-                            3: "k",
-                            6: "M",
-                            9: "G",
-                            12: "T",
-                        }
-                        if exp_mult in prefixes:
-                            return f"{prefixes[exp_mult]}{base_symbol}"
+                        if exp_mult == 0:
+                            return base_symbol
+                        if prefix := is_si_prefixed_unit.get_display_prefix(exp_mult):
+                            return f"{prefix}{base_symbol}"
                         # For other exponents, show as multiplier
                         if exp_mult != 0:
                             return f"{format_number(multiplier)}{base_symbol}"
-                        return base_symbol
 
         # Fall back to rendering the basis vector
         result = "·".join(
@@ -859,7 +800,7 @@ class is_unit(fabll.Node):
 
         return out
 
-    def serialize_for_api(self: "is_unit | None") -> str | dict | None:
+    def serialize_for_api(self: "is_unit | None") -> str | None:
         """
         Serialize unit for the component API backend.
 
@@ -880,18 +821,9 @@ class is_unit(fabll.Node):
             # Fallback to first symbol if no lowercase name found
             return symbols[0]
 
-        # For anonymous/complex units, return the full structure
-        out = {}
-        basis_vector = is_unit._extract_basis_vector(self)
-        multiplier = is_unit._extract_multiplier(self)
-        offset = is_unit._extract_offset(self)
-
-        out["symbols"] = symbols
-        out["basis_vector"] = basis_vector.to_dict()
-        out["multiplier"] = multiplier
-        out["offset"] = offset
-
-        return out
+        raise UnitSerializationError(
+            f"Unable to serialize unit with no symbols: {self}"
+        )
 
 
 class is_si_unit(fabll.Node):
@@ -911,12 +843,29 @@ class has_unit(fabll.Node):
         )
         return out
 
+    @classmethod
+    def MakeChild_FromType(cls, unit_type: type[fabll.Node]) -> fabll._ChildField[Self]:
+        """Create has_unit pointing to type-level is_unit on the given unit type.
+
+        Uses a type reference (<<TypeName) to point directly to the unit type's
+        is_unit trait. The unit type is lazily registered in the TypeGraph
+        when the edge path is resolved.
+        """
+        out = fabll._ChildField(cls)
+        out.add_dependant(
+            F.Collections.Pointer.MakeEdge(
+                [out, cls.is_unit_ptr], [unit_type, "is_unit"]
+            )
+        )
+        return out
+
     def setup(self, is_unit: "is_unit") -> Self:  # type: ignore[invalid-method-override]
         self.is_unit_ptr.get().point(is_unit)
         return self
 
     def get_is_unit(self) -> "is_unit":
-        return self.is_unit_ptr.get().deref().cast(is_unit)
+        derefed = self.is_unit_ptr.get().deref()
+        return is_unit(instance=derefed.instance)
 
 
 class has_display_unit(fabll.Node):
@@ -931,12 +880,29 @@ class has_display_unit(fabll.Node):
         )
         return out
 
+    @classmethod
+    def MakeChild_FromType(cls, unit_type: type[fabll.Node]) -> fabll._ChildField[Self]:
+        """Create has_display_unit pointing to type-level is_unit on the given unit type
+
+        Uses a type reference (<<TypeName) to point directly to the unit type's
+        is_unit trait. The unit type is lazily registered in the TypeGraph
+        when the edge path is resolved.
+        """
+        out = fabll._ChildField(cls)
+        out.add_dependant(
+            F.Collections.Pointer.MakeEdge(
+                [out, cls.is_unit_ptr], [unit_type, "is_unit"]
+            )
+        )
+        return out
+
     def setup(self, is_unit: "is_unit") -> Self:  # type: ignore[invalid-method-override]
         self.is_unit_ptr.get().point(is_unit)
         return self
 
     def get_is_unit(self) -> "is_unit":
-        return self.is_unit_ptr.get().deref().cast(is_unit)
+        derefed = self.is_unit_ptr.get().deref()
+        return is_unit(instance=derefed.instance)
 
 
 class is_si_prefixed_unit(fabll.Node):
@@ -970,6 +936,39 @@ class is_si_prefixed_unit(fabll.Node):
     }
 
     is_trait = fabll.Traits.MakeEdge(fabll.ImplementsTrait.MakeChild().put_on_type())
+
+    DISPLAY_PREFIXES: ClassVar[tuple[tuple[int, str], ...]] = (
+        (12, "T"),
+        (9, "G"),
+        (6, "M"),
+        (3, "k"),
+        (0, ""),
+        (-3, "m"),
+        (-6, "µ"),
+        (-9, "n"),
+        (-12, "p"),
+    )
+
+    @classmethod
+    def get_scale_factor(cls, value: float) -> tuple[float, str]:
+        """Find the best SI prefix for display auto-scaling."""
+        if value == 0 or math.isinf(value):
+            return 1.0, ""
+
+        abs_val = abs(value)
+        for exponent, prefix in cls.DISPLAY_PREFIXES:
+            scale = 10.0**exponent
+            if abs_val >= scale * 0.999:
+                return scale, prefix
+
+        return 10.0**-12, "p"
+
+    @classmethod
+    def get_display_prefix(cls, exponent: int) -> str | None:
+        for known_exponent, prefix in cls.DISPLAY_PREFIXES:
+            if exponent == known_exponent:
+                return prefix
+        return None
 
 
 class is_binary_prefixed_unit(fabll.Node):
@@ -1048,12 +1047,13 @@ def decode_symbol(
             else:
                 continue
 
-            # fabll_unit_type_node = not_none(
-            #     fabll_unit_type.bind_typegraph(tg).try_get_type_trait(is_unit_type)
-            # ).get_basis_vector()
             unit_expression_t = UnitExpressionFactory(
                 (symbol,), ((fabll_unit_type, 1),), scale_factor, 0.0
             )
+
+            # Register the dynamically created type in the TypeGraph so it can
+            # be referenced via << type lookups by MakeChild_FromType
+            fabll.TypeNodeBoundTG.get_or_create_type_in_tg(tg=tg, t=unit_expression_t)
 
             return unit_expression_t
 
@@ -1062,27 +1062,16 @@ def decode_symbol(
     )
 
 
-# TODO: remove?
-# Cache keyed by (g_uuid, symbol) for resolved units
-_decode_symbol_cache: dict[tuple[int, str], "is_unit | None"] = {}
-
-
 def decode_symbol_runtime(
     g: graph.GraphView, tg: fbrk.TypeGraph, symbol: str
 ) -> "is_unit | None":
-    g_uuid = g.get_self_node().node().get_uuid()
-    cache_key = (g_uuid, symbol)
-
-    if cached := _decode_symbol_cache.get(cache_key):
-        return cached
-
-    # Build symbol map fresh each cache miss (graph may have grown)
-    all_units = fabll.Traits.get_implementors(is_unit.bind_typegraph(tg), g)
+    all_units: list[is_unit] = list(
+        fabll.Traits.get_implementors(is_unit.bind_typegraph(tg), g)
+    )
     symbol_map = {s: unit for unit in all_units for s in unit.get_symbols()}
 
     # 1. Exact match
     if symbol in symbol_map:
-        _decode_symbol_cache[cache_key] = symbol_map[symbol]
         return symbol_map[symbol]
 
     # 2. Prefixed
@@ -1108,7 +1097,6 @@ def decode_symbol_runtime(
             result = unit.scaled_copy(
                 g=g, tg=tg, multiplier=scale_factor, symbol=symbol
             )
-            _decode_symbol_cache[cache_key] = result
             return result
 
     raise UnitNotFoundError(symbol, _get_close_matches(symbol, list(symbol_map.keys())))
@@ -1185,6 +1173,9 @@ class _UnitRegistry(Enum):
     # angular frequency
     Rpm = auto()
 
+    # data rate
+    BitsPerSecond = auto()
+
 
 PERCENT_SYMBOL = "%"
 DIMENSIONLESS_SYMBOL = "dimensionless"
@@ -1238,6 +1229,7 @@ _UNIT_SYMBOLS: dict[_UnitRegistry, tuple[str, ...]] = {
     _UnitRegistry.Liter: ("liter",),
     _UnitRegistry.Rpm: ("rpm", "RPM"),
     _UnitRegistry.AmpereHour: ("Ah",),
+    _UnitRegistry.BitsPerSecond: ("bps",),
 }
 
 # Lookup table mapping (basis_vector_tuple, multiplier) to primary symbol
@@ -1264,6 +1256,7 @@ _BASIS_VECTOR_TO_SYMBOL: dict[tuple[tuple[int, ...], float], str] = {
     ((-1, -2, 2, 1, 0, 0, 0, 0, 0, 0), 1.0): "Wb",  # Weber
     ((-1, -2, 0, 1, 0, 0, 0, 0, 0, 0), 1.0): "T",  # Tesla
     ((-2, -2, 2, 1, 0, 0, 0, 0, 0, 0), 1.0): "H",  # Henry
+    ((0, -1, 0, 0, 0, 0, 0, 0, 0, 1), 1.0): "bps",  # BitsPerSecond: bit·s⁻¹
 }
 
 
@@ -1293,18 +1286,15 @@ class Dimensionless(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.Dimensionless], unit_vector_arg
-        )
-    ).put_on_type()
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             tuple(_UNIT_SYMBOLS[_UnitRegistry.Dimensionless]),
             unit_vector_arg,
         )
-    )
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
 
 
 UnitVectorT = tuple[tuple[type[fabll.Node], int], ...]
@@ -1455,10 +1445,10 @@ def UnitExpressionFactory(
         symbols = tuple(_UNIT_SYMBOLS[unit_registry_member])
     assert len(symbols) >= 1, "Unit Expression must have at least one symbol"
 
-    # Derive the basis/multiplier/offset tuple for this expression.
     # Resolve the unit vector to get the composed basis vector, multiplier, and offset
-    # from any nested UnitExpressions. Then combine with the user-provided values.
     unit_info = resolve_unit_vector(unit_vector)
+    effective_multiplier = multiplier * unit_info.multiplier
+    effective_offset = offset + unit_info.offset
 
     ConcreteUnitExpr._add_field(
         "is_unit",
@@ -1466,26 +1456,42 @@ def UnitExpressionFactory(
             is_unit.MakeChild(
                 symbols,
                 unit_info.basis_vector,
-                multiplier * unit_info.multiplier,
-                offset + unit_info.offset,
+                effective_multiplier,
+                effective_offset,
             )
-        ),
+        ).put_on_type(),
     )
+
+    # Set _base_unit_type for non-base single-component UnitExpressions
+    # (e.g. nF -> Farad).
+    # Multi-component expressions (e.g. km/h) don't have a single named base unit type;
+    # find_base_unit_type will raise NoBaseUnitError if they're used as has_unit.
+    if (
+        (effective_multiplier != 1.0 or effective_offset != 0.0)
+        and len(unit_vector) == 1
+        and unit_vector[0][1] == 1
+    ):
+        ConcreteUnitExpr._base_unit_type = find_base_unit_type(unit_vector[0][0])
 
     return ConcreteUnitExpr
 
 
 class _AnonymousUnit(fabll.Node):
     _is_unit_id: ClassVar[str] = "is_unit"
-    is_unit_type = fabll.Traits.MakeEdge(is_unit_type.MakeChild(())).put_on_type()
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
 
     def get_is_unit(self) -> "is_unit":
-        # FIXME
+        # Look up is_unit on the type node (type-level singleton)
+        type_edge = not_none(fbrk.EdgeType.get_type_edge(bound_node=self.instance))
+        type_bound = self.instance.g().bind(
+            node=fbrk.EdgeType.get_type_node(edge=type_edge.edge())
+        )
         return is_unit.bind_instance(
             instance=not_none(
                 fbrk.EdgeComposition.get_child_by_identifier(
-                    bound_node=self.instance, child_identifier=self._is_unit_id
+                    bound_node=type_bound, child_identifier=self._is_unit_id
                 )
             )
         )
@@ -1517,7 +1523,9 @@ def AnonymousUnitFactory(
 
     ConcreteUnit._add_field(
         ConcreteUnit._is_unit_id,
-        fabll.Traits.MakeEdge(is_unit.MakeChild(symbols, vector, multiplier, offset)),
+        fabll.Traits.MakeEdge(
+            is_unit.MakeChild(symbols, vector, multiplier, offset)
+        ).put_on_type(),
     )
 
     return ConcreteUnit
@@ -1679,15 +1687,11 @@ class _UnitExpressionResolver:
 
 def resolve_unit_expression(
     g: graph.GraphView, tg: fbrk.TypeGraph, expr: graph.BoundNode
-) -> _AnonymousUnit | None:
+) -> "is_unit | None":
     # TODO: caching?
     resolver = _UnitExpressionResolver(g=g, tg=tg)
     node = fabll.Node.bind_instance(expr)
-    result_unit = resolver.visit(node)
-    if result_unit is None:
-        return None
-    parent, _ = result_unit.get_parent_force()
-    return parent.cast(_AnonymousUnit, check=False)
+    return resolver.visit(node)
 
 
 def resolve_unit_vector(unit_vector: UnitVectorT) -> UnitInfo:
@@ -1726,6 +1730,20 @@ def extract_unit_info(unit_type: type[fabll.Node]) -> UnitInfo:
     return UnitInfo(basis_vector=basis_vector, multiplier=multiplier, offset=offset)
 
 
+def find_base_unit_type(unit: type[fabll.Node]) -> type[fabll.Node]:
+    """Find the base unit type (multiplier=1.0, offset=0.0) for a unit's dimension.
+
+    Base units return themselves. Non-base units must have _base_unit_type set.
+    """
+    info = extract_unit_info(unit)
+    if info.multiplier == 1.0 and info.offset == 0.0:
+        return unit
+    try:
+        return unit._base_unit_type  # type: ignore[attr-defined]
+    except AttributeError:
+        raise NoBaseUnitError(unit)
+
+
 # SI base units ------------------------------------------------------------------------
 
 
@@ -1734,15 +1752,7 @@ class Ampere(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_base_unit = fabll.Traits.MakeEdge(is_base_unit.MakeChild())
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.Ampere],
-            unit_vector_arg,
-            multiplier_arg,
-            offset_arg,
-        ),
-    ).put_on_type()
+    is_base_unit = fabll.Traits.MakeEdge(is_base_unit.MakeChild()).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.Ampere],
@@ -1750,10 +1760,14 @@ class Ampere(fabll.Node):
             multiplier_arg,
             offset_arg,
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Meter(fabll.Node):
@@ -1761,15 +1775,7 @@ class Meter(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_base_unit = fabll.Traits.MakeEdge(is_base_unit.MakeChild())
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.Meter],
-            unit_vector_arg,
-            multiplier_arg,
-            offset_arg,
-        )
-    ).put_on_type()
+    is_base_unit = fabll.Traits.MakeEdge(is_base_unit.MakeChild()).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.Meter],
@@ -1777,10 +1783,14 @@ class Meter(fabll.Node):
             multiplier_arg,
             offset_arg,
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Kilogram(fabll.Node):
@@ -1788,15 +1798,14 @@ class Kilogram(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_base_unit = fabll.Traits.MakeEdge(is_base_unit.MakeChild())
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Kilogram], unit_vector_arg)
-    ).put_on_type()
+    is_base_unit = fabll.Traits.MakeEdge(is_base_unit.MakeChild()).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Kilogram], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
 
 
 class Second(fabll.Node):
@@ -1804,16 +1813,17 @@ class Second(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_base_unit = fabll.Traits.MakeEdge(is_base_unit.MakeChild())
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Second], unit_vector_arg)
-    ).put_on_type()
+    is_base_unit = fabll.Traits.MakeEdge(is_base_unit.MakeChild()).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Second], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Kelvin(fabll.Node):
@@ -1821,16 +1831,17 @@ class Kelvin(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_base_unit = fabll.Traits.MakeEdge(is_base_unit.MakeChild())
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Kelvin], unit_vector_arg)
-    ).put_on_type()
+    is_base_unit = fabll.Traits.MakeEdge(is_base_unit.MakeChild()).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Kelvin], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Mole(fabll.Node):
@@ -1838,16 +1849,17 @@ class Mole(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_base_unit = fabll.Traits.MakeEdge(is_base_unit.MakeChild())
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Mole], unit_vector_arg)
-    ).put_on_type()
+    is_base_unit = fabll.Traits.MakeEdge(is_base_unit.MakeChild()).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Mole], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Candela(fabll.Node):
@@ -1855,16 +1867,17 @@ class Candela(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_base_unit = fabll.Traits.MakeEdge(is_base_unit.MakeChild())
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Candela], unit_vector_arg)
-    ).put_on_type()
+    is_base_unit = fabll.Traits.MakeEdge(is_base_unit.MakeChild()).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Candela], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 # SI coherent derived units ------------------------------------------------------------
@@ -1875,15 +1888,16 @@ class Radian(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Radian], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Radian], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Steradian(fabll.Node):
@@ -1891,15 +1905,16 @@ class Steradian(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Steradian], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Steradian], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Hertz(fabll.Node):
@@ -1907,14 +1922,15 @@ class Hertz(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Hertz], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Hertz], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Newton(fabll.Node):
@@ -1922,14 +1938,15 @@ class Newton(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Newton], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Newton], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Pascal(fabll.Node):
@@ -1939,15 +1956,16 @@ class Pascal(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Pascal], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Pascal], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Joule(fabll.Node):
@@ -1955,15 +1973,16 @@ class Joule(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Joule], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Joule], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Watt(fabll.Node):
@@ -1971,15 +1990,16 @@ class Watt(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Watt], unit_vector_arg)
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
     ).put_on_type()
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Watt], unit_vector_arg)
-    )
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Coulomb(fabll.Node):
@@ -1987,15 +2007,16 @@ class Coulomb(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Coulomb], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Coulomb], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Volt(fabll.Node):
@@ -2005,15 +2026,16 @@ class Volt(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Volt], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Volt], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Farad(fabll.Node):
@@ -2023,15 +2045,16 @@ class Farad(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Farad], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Farad], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Ohm(fabll.Node):
@@ -2041,15 +2064,16 @@ class Ohm(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Ohm], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Ohm], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Siemens(fabll.Node):
@@ -2059,15 +2083,16 @@ class Siemens(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Siemens], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Siemens], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Weber(fabll.Node):
@@ -2077,15 +2102,16 @@ class Weber(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Weber], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Weber], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Tesla(fabll.Node):
@@ -2095,15 +2121,16 @@ class Tesla(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Tesla], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Tesla], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Henry(fabll.Node):
@@ -2113,39 +2140,38 @@ class Henry(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Henry], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Henry], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class DegreeCelsius(fabll.Node):
+    _base_unit_type: ClassVar[type[fabll.Node]] = Kelvin
     unit_vector_arg: ClassVar[BasisVector] = BasisVector(kelvin=1)
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 273.15
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.DegreeCelsius],
-            unit_vector_arg,
-            offset=273.15,
-        )
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.DegreeCelsius],
             unit_vector_arg,
             offset=273.15,
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Lumen(fabll.Node):
@@ -2153,15 +2179,16 @@ class Lumen(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Lumen], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Lumen], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Lux(fabll.Node):
@@ -2171,15 +2198,16 @@ class Lux(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Lux], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Lux], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 # TODO: prevent mixing with Hertz via context/domain tagging system?
@@ -2188,15 +2216,16 @@ class Becquerel(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Becquerel], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Becquerel], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Gray(fabll.Node):
@@ -2204,15 +2233,16 @@ class Gray(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Gray], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Gray], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Sievert(fabll.Node):
@@ -2220,15 +2250,16 @@ class Sievert(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Sievert], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Sievert], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Katal(fabll.Node):
@@ -2236,37 +2267,38 @@ class Katal(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Katal], unit_vector_arg)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Katal], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_unit = fabll.Traits.MakeEdge(is_si_unit.MakeChild()).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 # SI patches ---------------------------------------------------------------------------
 
 
 class Gram(fabll.Node):
+    _base_unit_type: ClassVar[type[fabll.Node]] = Kilogram
     unit_vector_arg: ClassVar[BasisVector] = BasisVector(kilogram=1)
     multiplier_arg: ClassVar[float] = 1e-3
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.Gram], unit_vector_arg, multiplier=1e-3
-        )
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.Gram], unit_vector_arg, multiplier=1e-3
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 # non-SI base units --------------------------------------------------------------------
@@ -2277,244 +2309,213 @@ class Bit(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_base_unit = fabll.Traits.MakeEdge(is_base_unit.MakeChild())
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Bit], unit_vector_arg)
-    ).put_on_type()
+    is_base_unit = fabll.Traits.MakeEdge(is_base_unit.MakeChild()).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(_UNIT_SYMBOLS[_UnitRegistry.Bit], unit_vector_arg)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
-    is_binary_prefixed = fabll.Traits.MakeEdge(is_binary_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
+    is_binary_prefixed = fabll.Traits.MakeEdge(
+        is_binary_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 # Dimensionless scalar multiples -------------------------------------------------------
 
 
 class Percent(fabll.Node):
+    _base_unit_type: ClassVar[type[fabll.Node]] = Dimensionless
     unit_vector_arg: ClassVar[BasisVector] = _BasisVector.ORIGIN
     multiplier_arg: ClassVar[float] = 1e-2
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.Percent], unit_vector_arg, multiplier=1e-2
-        )
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.Percent], unit_vector_arg, multiplier=1e-2
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
 
 
 class Ppm(fabll.Node):
+    _base_unit_type: ClassVar[type[fabll.Node]] = Dimensionless
     unit_vector_arg: ClassVar[BasisVector] = _BasisVector.ORIGIN
     multiplier_arg: ClassVar[float] = 1e-6
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.Ppm], unit_vector_arg, multiplier=1e-6
-        )
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.Ppm], unit_vector_arg, multiplier=1e-6
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
 
 
 # Common non-SI multiples --------------------------------------------------------------
 
 
 class Degree(fabll.Node):
+    _base_unit_type: ClassVar[type[fabll.Node]] = Radian
     unit_vector_arg: ClassVar[BasisVector] = BasisVector(radian=1)
     multiplier_arg: ClassVar[float] = math.pi / 180.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.Degree],
-            unit_vector_arg,
-            multiplier=math.pi / 180.0,
-        )
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.Degree],
             unit_vector_arg,
             multiplier=math.pi / 180.0,
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
 
 
 class ArcMinute(fabll.Node):
+    _base_unit_type: ClassVar[type[fabll.Node]] = Radian
     unit_vector_arg: ClassVar[BasisVector] = BasisVector(radian=1)
     multiplier_arg: ClassVar[float] = math.pi / 180.0 / 60.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.ArcMinute],
-            unit_vector_arg,
-            multiplier=math.pi / 180.0 / 60.0,
-        )
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.ArcMinute],
             unit_vector_arg,
             multiplier=math.pi / 180.0 / 60.0,
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
 
 
 class ArcSecond(fabll.Node):
+    _base_unit_type: ClassVar[type[fabll.Node]] = Radian
     unit_vector_arg: ClassVar[BasisVector] = BasisVector(radian=1)
     multiplier_arg: ClassVar[float] = math.pi / 180.0 / 3600.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.ArcSecond],
-            unit_vector_arg,
-            multiplier=math.pi / 180.0 / 3600.0,
-        )
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.ArcSecond],
             unit_vector_arg,
             multiplier=math.pi / 180.0 / 3600.0,
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
 
 
 class Minute(fabll.Node):
+    _base_unit_type: ClassVar[type[fabll.Node]] = Second
     unit_vector_arg: ClassVar[BasisVector] = BasisVector(second=1)
     multiplier_arg: ClassVar[float] = 60.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.Minute], unit_vector_arg, multiplier=60.0
-        )
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.Minute], unit_vector_arg, multiplier=60.0
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
 
 
 class Hour(fabll.Node):
+    _base_unit_type: ClassVar[type[fabll.Node]] = Second
     unit_vector_arg: ClassVar[BasisVector] = BasisVector(second=1)
     multiplier_arg: ClassVar[float] = 3600.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.Hour], unit_vector_arg, multiplier=3600.0
-        )
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.Hour], unit_vector_arg, multiplier=3600.0
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
 
 
 class Day(fabll.Node):
+    _base_unit_type: ClassVar[type[fabll.Node]] = Second
     unit_vector_arg: ClassVar[BasisVector] = BasisVector(second=1)
     multiplier_arg: ClassVar[float] = 24 * 3600.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.Day], unit_vector_arg, multiplier=24 * 3600.0
-        )
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.Day], unit_vector_arg, multiplier=24 * 3600.0
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
 
 
 class Week(fabll.Node):
+    _base_unit_type: ClassVar[type[fabll.Node]] = Second
     unit_vector_arg: ClassVar[BasisVector] = BasisVector(second=1)
     multiplier_arg: ClassVar[float] = 7 * 24 * 3600.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.Week],
-            unit_vector_arg,
-            multiplier=7 * 24 * 3600.0,
-        )
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.Week],
             unit_vector_arg,
             multiplier=7 * 24 * 3600.0,
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
 
 
 class Month(fabll.Node):
+    _base_unit_type: ClassVar[type[fabll.Node]] = Second
     unit_vector_arg: ClassVar[BasisVector] = BasisVector(second=1)
     multiplier_arg: ClassVar[float] = (365.25 / 12) * 24 * 3600.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.Month],
-            unit_vector_arg,
-            multiplier=(365.25 / 12) * 24 * 3600.0,
-        )
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.Month],
             unit_vector_arg,
             multiplier=(365.25 / 12) * 24 * 3600.0,
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
 
 
 class Year(fabll.Node):
+    _base_unit_type: ClassVar[type[fabll.Node]] = Second
     unit_vector_arg: ClassVar[BasisVector] = BasisVector(second=1)
     multiplier_arg: ClassVar[float] = 365.25 * 24 * 3600.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.Year],
-            unit_vector_arg,
-            multiplier=365.25 * 24 * 3600.0,
-        )
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.Year],
             unit_vector_arg,
             multiplier=365.25 * 24 * 3600.0,
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
 
 
 class Liter(fabll.Node):
@@ -2522,18 +2523,17 @@ class Liter(fabll.Node):
     multiplier_arg: ClassVar[float] = 1e-3
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.Liter], unit_vector_arg, multiplier=1e-3
-        )
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.Liter], unit_vector_arg, multiplier=1e-3
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class Rpm(fabll.Node):
@@ -2541,41 +2541,38 @@ class Rpm(fabll.Node):
     multiplier_arg: ClassVar[float] = (2 * math.pi) / 60.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.Rpm],
-            unit_vector_arg,
-            multiplier=(2 * math.pi) / 60.0,
-        )
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.Rpm],
             unit_vector_arg,
             multiplier=(2 * math.pi) / 60.0,
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
 
 
 class Byte(fabll.Node):
+    _base_unit_type: ClassVar[type[fabll.Node]] = Bit
     unit_vector_arg: ClassVar[BasisVector] = BasisVector(bit=1)
     multiplier_arg: ClassVar[float] = 8.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild(
-            _UNIT_SYMBOLS[_UnitRegistry.Byte], unit_vector_arg, multiplier=8.0
-        )
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(
             _UNIT_SYMBOLS[_UnitRegistry.Byte], unit_vector_arg, multiplier=8.0
         )
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
-    is_binary_prefixed = fabll.Traits.MakeEdge(is_binary_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
+    is_binary_prefixed = fabll.Traits.MakeEdge(
+        is_binary_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 # Shortcuts for use elsewhere in the standard library ---------------------------------
@@ -2586,28 +2583,35 @@ class BitsPerSecond(fabll.Node):
     multiplier_arg: ClassVar[float] = 1.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild((), unit_vector_arg)
+    is_unit = fabll.Traits.MakeEdge(
+        is_unit.MakeChild((), unit_vector_arg)
     ).put_on_type()
-    is_unit = fabll.Traits.MakeEdge(is_unit.MakeChild((), unit_vector_arg))
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
-    is_binary_prefixed = fabll.Traits.MakeEdge(is_binary_prefixed_unit.MakeChild())
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
+    is_binary_prefixed = fabll.Traits.MakeEdge(
+        is_binary_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 class AmpereHour(fabll.Node):
+    _base_unit_type: ClassVar[type[fabll.Node]] = Coulomb
     unit_vector_arg: ClassVar[BasisVector] = BasisVector(ampere=1, second=1)
     multiplier_arg: ClassVar[float] = 3600.0
     offset_arg: ClassVar[float] = 0.0
 
-    is_unit_type = fabll.Traits.MakeEdge(
-        is_unit_type.MakeChild((), unit_vector_arg, multiplier=3600.0)
-    ).put_on_type()
     is_unit = fabll.Traits.MakeEdge(
         is_unit.MakeChild(("Ah",), unit_vector_arg, multiplier=3600.0)
-    )
-    can_be_operand = fabll.Traits.MakeEdge(F.Parameters.can_be_operand.MakeChild())
-    is_si_prefixed = fabll.Traits.MakeEdge(is_si_prefixed_unit.MakeChild())
+    ).put_on_type()
+    can_be_operand = fabll.Traits.MakeEdge(
+        F.Parameters.can_be_operand.MakeChild()
+    ).put_on_type()
+    is_si_prefixed = fabll.Traits.MakeEdge(
+        is_si_prefixed_unit.MakeChild()
+    ).put_on_type()
 
 
 AmpereSecond = UnitExpressionFactory(("As",), ((Ampere, 1), (Second, 1)))
@@ -2625,7 +2629,7 @@ def register_all_units(
     """
     Register all unit type nodes in the typegraph.
 
-    Note: This only creates TYPE NODES, not instances. The is_unit_type
+    Note: This only creates TYPE NODES, not instances. The is_unit
     traits are accessible at the type level via try_get_type_trait().
 
     Returns symbol map of unit type by symbol.
@@ -2659,77 +2663,77 @@ class BoundUnitsContext:
     @property
     @once
     def Meter(self) -> Meter:
-        return Meter.bind_typegraph(tg=self.tg).create_instance(g=self.g)
+        return Meter.bind_typegraph(tg=self.tg).as_type_node()
 
     @property
     @once
     def Second(self) -> Second:
-        return Second.bind_typegraph(tg=self.tg).create_instance(g=self.g)
+        return Second.bind_typegraph(tg=self.tg).as_type_node()
 
     @property
     @once
     def Hour(self) -> Hour:
-        return Hour.bind_typegraph(tg=self.tg).create_instance(g=self.g)
+        return Hour.bind_typegraph(tg=self.tg).as_type_node()
 
     @property
     @once
     def Dimensionless(self) -> Dimensionless:
-        return Dimensionless.bind_typegraph(tg=self.tg).create_instance(g=self.g)
+        return Dimensionless.bind_typegraph(tg=self.tg).as_type_node()
 
     @property
     @once
     def Percent(self) -> Percent:
-        return Percent.bind_typegraph(tg=self.tg).create_instance(g=self.g)
+        return Percent.bind_typegraph(tg=self.tg).as_type_node()
 
     @property
     @once
     def Ppm(self) -> Ppm:
-        return Ppm.bind_typegraph(tg=self.tg).create_instance(g=self.g)
+        return Ppm.bind_typegraph(tg=self.tg).as_type_node()
 
     @property
     @once
     def Radian(self) -> Radian:
-        return Radian.bind_typegraph(tg=self.tg).create_instance(g=self.g)
+        return Radian.bind_typegraph(tg=self.tg).as_type_node()
 
     @property
     @once
     def Steradian(self) -> Steradian:
-        return Steradian.bind_typegraph(tg=self.tg).create_instance(g=self.g)
+        return Steradian.bind_typegraph(tg=self.tg).as_type_node()
 
     @property
     @once
     def DegreeCelsius(self) -> DegreeCelsius:
-        return DegreeCelsius.bind_typegraph(tg=self.tg).create_instance(g=self.g)
+        return DegreeCelsius.bind_typegraph(tg=self.tg).as_type_node()
 
     @property
     @once
     def Kelvin(self) -> Kelvin:
-        return Kelvin.bind_typegraph(tg=self.tg).create_instance(g=self.g)
+        return Kelvin.bind_typegraph(tg=self.tg).as_type_node()
 
     @property
     @once
     def Volt(self) -> Volt:
-        return Volt.bind_typegraph(tg=self.tg).create_instance(g=self.g)
+        return Volt.bind_typegraph(tg=self.tg).as_type_node()
 
     @property
     @once
     def Ohm(self) -> Ohm:
-        return Ohm.bind_typegraph(tg=self.tg).create_instance(g=self.g)
+        return Ohm.bind_typegraph(tg=self.tg).as_type_node()
 
     @property
     @once
     def Ampere(self) -> Ampere:
-        return Ampere.bind_typegraph(tg=self.tg).create_instance(g=self.g)
+        return Ampere.bind_typegraph(tg=self.tg).as_type_node()
 
     @property
     @once
     def Degree(self) -> Degree:
-        return Degree.bind_typegraph(tg=self.tg).create_instance(g=self.g)
+        return Degree.bind_typegraph(tg=self.tg).as_type_node()
 
     @property
     @once
     def Bit(self) -> Bit:
-        return Bit.bind_typegraph(tg=self.tg).create_instance(g=self.g)
+        return Bit.bind_typegraph(tg=self.tg).as_type_node()
 
 
 class _TestWithContext:
@@ -2770,8 +2774,7 @@ class TestIsUnit(_TestWithContext):
         """Test that single item list returns its unit"""
         result = TestIsUnit.assert_commensurability([ctx.Meter.is_unit.get()])
         assert result == ctx.Meter.is_unit.get()
-        parent, _ = result.get_parent_force()
-        assert parent.isinstance(Meter)
+        assert result.serialize() == "m"
         assert is_unit.bind_instance(result.instance).get_symbols() == ["m"]
 
     def test_assert_commensurability(self, ctx: BoundUnitsContext):
@@ -2782,8 +2785,7 @@ class TestIsUnit(_TestWithContext):
                 ctx.Hour.is_unit.get(),
             ]
         )
-        parent, _ = result.get_parent_force()
-        assert parent.isinstance(Second)
+        assert result.serialize() == "s"
 
     def test_assert_incommensurability(self, ctx: BoundUnitsContext):
         """Test that incompatible units raise UnitsNotCommensurable"""
@@ -2803,24 +2805,14 @@ class TestIsUnit(_TestWithContext):
             ("km/h", "kph"), ((KilometerExpr, 1), (Hour, -1))
         )
 
-        class _App(fabll.Node):
-            meters_per_second_expr = MetersPerSecondExpr.MakeChild()
-            kilometers_per_hour_expr = KilometersPerHourExpr.MakeChild()
-
-        app = _App.bind_typegraph(tg=ctx.tg).create_instance(g=ctx.g)
-        meters_per_second = resolve_unit_expression(
-            tg=ctx.tg, g=ctx.g, expr=app.meters_per_second_expr.get().instance
+        mps_unit = (
+            MetersPerSecondExpr.bind_typegraph(tg=ctx.tg).as_type_node().is_unit.get()
         )
-        kilometers_per_hour = resolve_unit_expression(
-            tg=ctx.tg, g=ctx.g, expr=app.kilometers_per_hour_expr.get().instance
+        kmh_unit = (
+            KilometersPerHourExpr.bind_typegraph(tg=ctx.tg).as_type_node().is_unit.get()
         )
 
-        TestIsUnit.assert_commensurability(
-            [
-                meters_per_second.get_trait(is_unit),
-                kilometers_per_hour.get_trait(is_unit),
-            ]
-        )
+        TestIsUnit.assert_commensurability([mps_unit, kmh_unit])
 
     def test_assert_commensurability_with_incommensurable_derived(
         self,
@@ -2832,24 +2824,14 @@ class TestIsUnit(_TestWithContext):
         )
         MeterSecondsExpr = UnitExpressionFactory(("m*s",), ((Meter, 1), (Second, 1)))
 
-        class _App(fabll.Node):
-            meters_per_second_expr = MetersPerSecondExpr.MakeChild()
-            meter_seconds_expr = MeterSecondsExpr.MakeChild()
-
-        app = _App.bind_typegraph(tg=ctx.tg).create_instance(g=ctx.g)
-        meters_per_second = resolve_unit_expression(
-            tg=ctx.tg, g=ctx.g, expr=app.meters_per_second_expr.get().instance
+        mps_unit = (
+            MetersPerSecondExpr.bind_typegraph(tg=ctx.tg).as_type_node().is_unit.get()
         )
-        meter_seconds = resolve_unit_expression(
-            tg=ctx.tg, g=ctx.g, expr=app.meter_seconds_expr.get().instance
+        ms_unit = (
+            MeterSecondsExpr.bind_typegraph(tg=ctx.tg).as_type_node().is_unit.get()
         )
         with pytest.raises(UnitsNotCommensurableError):
-            TestIsUnit.assert_commensurability(
-                [
-                    not_none(meters_per_second).get_trait(is_unit),
-                    not_none(meter_seconds).get_trait(is_unit),
-                ]
-            )
+            TestIsUnit.assert_commensurability([mps_unit, ms_unit])
 
     def test_dimensionless_radian_steradian_incompatible(self, ctx: BoundUnitsContext):
         """
@@ -2875,8 +2857,7 @@ class TestIsUnit(_TestWithContext):
         ppm = ctx.Ppm.is_unit.get()
 
         result = TestIsUnit.assert_commensurability([dimensionless, percent, ppm])
-        parent, _ = result.get_parent_force()
-        assert parent.isinstance(Dimensionless)
+        assert result.serialize() == "dimensionless"
 
     def test_unit_multiply(self, ctx: BoundUnitsContext):
         """Test unit multiplication: Volt * Ampere produces Watt-equivalent basis."""
@@ -3021,7 +3002,7 @@ class TestIsUnit(_TestWithContext):
 
     def test_to_base_units_derived(self, ctx: BoundUnitsContext):
         """Derived unit normalizes to base SI dimensions."""
-        newton = Newton.bind_typegraph(tg=ctx.tg).create_instance(g=ctx.g).is_unit.get()
+        newton = Newton.bind_typegraph(tg=ctx.tg).as_type_node().is_unit.get()
         base = newton.to_base_units(g=ctx.g, tg=ctx.tg)
 
         assert is_unit._extract_basis_vector(base) == BasisVector(
@@ -3222,7 +3203,7 @@ class TestSymbols(_TestWithContext):
         self, ctx: BoundUnitsContext, symbol: str, expected_multiplier: float
     ):
         """Test decoding symbols with binary prefixes for units that support them."""
-        _ = Bit.bind_typegraph(tg=ctx.tg).create_instance(g=ctx.g)
+        Bit.bind_typegraph(tg=ctx.tg).as_type_node()
         decoded = decode_symbol_runtime(g=ctx.g, tg=ctx.tg, symbol=symbol)
 
         assert is_unit._extract_basis_vector(decoded) == BasisVector(bit=1)
@@ -3245,7 +3226,7 @@ class TestSymbols(_TestWithContext):
         """
         Test decoding symbols with binary prefixes for derived units that support them.
         """
-        _ = Byte.bind_typegraph(tg=ctx.tg).create_instance(g=ctx.g)
+        Byte.bind_typegraph(tg=ctx.tg).as_type_node()
         decoded = decode_symbol_runtime(g=ctx.g, tg=ctx.tg, symbol=symbol)
 
         assert is_unit._extract_basis_vector(decoded) == BasisVector(bit=1)
@@ -3295,15 +3276,7 @@ class TestUnitExpressions(_TestWithContext):
         """Test that a simple unit expression (Meter^1) resolves correctly."""
         MeterExpr = UnitExpressionFactory(("m", "meter"), ((Meter, 1),))
 
-        class _App(fabll.Node):
-            meter_expr = MeterExpr.MakeChild()
-
-        app = _App.bind_typegraph(tg=ctx.tg).create_instance(g=ctx.g)
-        resolved = resolve_unit_expression(
-            tg=ctx.tg, g=ctx.g, expr=app.meter_expr.get().instance
-        )
-
-        unit = not_none(resolved).get_trait(is_unit)
+        unit = MeterExpr.bind_typegraph(tg=ctx.tg).as_type_node().is_unit.get()
         assert unit._extract_basis_vector() == BasisVector(meter=1)
         assert unit._extract_multiplier() == 1.0
 
@@ -3311,15 +3284,7 @@ class TestUnitExpressions(_TestWithContext):
         """Test that derived units (Meter * Second^-1) resolve correctly."""
         VelocityExpr = UnitExpressionFactory(("m/s",), ((Meter, 1), (Second, -1)))
 
-        class _App(fabll.Node):
-            velocity_expr = VelocityExpr.MakeChild()
-
-        app = _App.bind_typegraph(tg=ctx.tg).create_instance(g=ctx.g)
-        resolved = resolve_unit_expression(
-            tg=ctx.tg, g=ctx.g, expr=app.velocity_expr.get().instance
-        )
-
-        unit = not_none(resolved).get_trait(is_unit)
+        unit = VelocityExpr.bind_typegraph(tg=ctx.tg).as_type_node().is_unit.get()
         assert unit._extract_basis_vector() == BasisVector(meter=1, second=-1)
         assert unit._extract_multiplier() == 1.0
 
@@ -3327,15 +3292,7 @@ class TestUnitExpressions(_TestWithContext):
         """Test that expressions with scaled units resolve with correct multiplier."""
         KilometerExpr = UnitExpressionFactory(("km",), ((Meter, 1),), multiplier=1000.0)
 
-        class _App(fabll.Node):
-            km_expr = KilometerExpr.MakeChild()
-
-        app = _App.bind_typegraph(tg=ctx.tg).create_instance(g=ctx.g)
-        resolved = resolve_unit_expression(
-            tg=ctx.tg, g=ctx.g, expr=app.km_expr.get().instance
-        )
-
-        unit = not_none(resolved).get_trait(is_unit)
+        unit = KilometerExpr.bind_typegraph(tg=ctx.tg).as_type_node().is_unit.get()
         assert unit._extract_basis_vector() == BasisVector(meter=1)
         assert unit._extract_multiplier() == 1000.0
 
@@ -3346,15 +3303,9 @@ class TestUnitExpressions(_TestWithContext):
             ("km/h", "kph"), ((KilometerExpr, 1), (Hour, -1))
         )
 
-        class _App(fabll.Node):
-            kmh_expr = KilometersPerHourExpr.MakeChild()
-
-        app = _App.bind_typegraph(tg=ctx.tg).create_instance(g=ctx.g)
-        resolved = resolve_unit_expression(
-            tg=ctx.tg, g=ctx.g, expr=app.kmh_expr.get().instance
+        unit = (
+            KilometersPerHourExpr.bind_typegraph(tg=ctx.tg).as_type_node().is_unit.get()
         )
-
-        unit = not_none(resolved).get_trait(is_unit)
         assert unit._extract_basis_vector() == BasisVector(meter=1, second=-1)
         # km/h = 1000m / 3600s
         assert unit._extract_multiplier() == pytest.approx(1000.0 / 3600.0)
@@ -3400,29 +3351,16 @@ class TestUnitExpressions(_TestWithContext):
             ("km",), ((Meter, 1),), multiplier=1000.0
         )
 
-        class _App(fabll.Node):
-            scaled_expr = ScaledMeterExpr.MakeChild()
-
-        app = _App.bind_typegraph(tg=ctx.tg).create_instance(g=ctx.g)
-        resolved = resolve_unit_expression(
-            tg=ctx.tg, g=ctx.g, expr=app.scaled_expr.get().instance
-        )
-
-        assert not_none(resolved).get_trait(is_unit)._extract_multiplier() == 1000.0
+        unit = ScaledMeterExpr.bind_typegraph(tg=ctx.tg).as_type_node().is_unit.get()
+        assert unit._extract_multiplier() == 1000.0
 
     def test_resolve_unit_expression_with_offset_raises(self, ctx: BoundUnitsContext):
-        """Test that UnitExpression with non-zero offset raises error."""
+        """Test that UnitExpression with non-zero offset has offset in is_unit."""
         OffsetExpr = UnitExpressionFactory(("m", "meter"), ((Meter, 1),), offset=10.0)
 
-        class _App(fabll.Node):
-            offset_expr = OffsetExpr.MakeChild()
-
-        app = _App.bind_typegraph(tg=ctx.tg).create_instance(g=ctx.g)
-
-        with pytest.raises(UnitExpressionError):
-            resolve_unit_expression(
-                tg=ctx.tg, g=ctx.g, expr=app.offset_expr.get().instance
-            )
+        unit = OffsetExpr.bind_typegraph(tg=ctx.tg).as_type_node().is_unit.get()
+        assert unit._extract_offset() == 10.0
+        assert unit.is_affine
 
     def test_resolve_non_integer_exponent_raises(self, ctx: BoundUnitsContext):
         """Test that non-integer exponents raise UnitExpressionError."""
@@ -3450,15 +3388,7 @@ class TestUnitExpressions(_TestWithContext):
         """Test that dimensionless results (e.g., Meter / Meter) are handled."""
         MeterOverMeterExpr = UnitExpressionFactory(("m/m",), ((Meter, 1), (Meter, -1)))
 
-        class _App(fabll.Node):
-            dimensionless_expr = MeterOverMeterExpr.MakeChild()
-
-        app = _App.bind_typegraph(tg=ctx.tg).create_instance(g=ctx.g)
-        resolved = resolve_unit_expression(
-            tg=ctx.tg, g=ctx.g, expr=app.dimensionless_expr.get().instance
-        )
-
-        unit = not_none(resolved).get_trait(is_unit)
+        unit = MeterOverMeterExpr.bind_typegraph(tg=ctx.tg).as_type_node().is_unit.get()
         assert unit._extract_basis_vector() == _BasisVector.ORIGIN
         assert unit.is_dimensionless()
 

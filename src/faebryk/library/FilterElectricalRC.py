@@ -8,6 +8,7 @@ import pytest
 
 import faebryk.core.node as fabll
 import faebryk.library._F as F
+from faebryk.core.solver.DiscreteSystem import DiscreteSystem
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,8 @@ class FilterElectricalRC(fabll.Node):
     # ----------------------------------------
     #            Expressions / Equations
     # ----------------------------------------
+    # FIXME(simple-solver): solving this three-variable RC equation still depends on
+    # the symbolic solver
     # RC filter cutoff frequency: fc = 1 / (2 * pi * R * C)
     _equations = [
         # fc = 1 / (2 * pi * R * C)
@@ -119,6 +122,16 @@ class FilterElectricalRC(fabll.Node):
         ),
     ]
 
+    discrete_solve_problem = DiscreteSystem.MakeChild(
+        unknowns=[
+            [resistor, F.Resistor.resistance],
+            [capacitor, F.Capacitor.capacitance],
+        ],
+        objective=[filter, F.Filter.cutoff_frequency],
+        objective_mode=DiscreteSystem.ObjectiveMode.target_center,
+        assert_=True,
+    )
+
     # ----------------------------------------
     #            Usage Example
     # ----------------------------------------
@@ -156,6 +169,7 @@ class FilterElectricalRC(fabll.Node):
 class TestFilterElectricalRC:
     """Tests for FilterElectricalRC solver equations."""
 
+    @pytest.mark.full_solver_only
     @pytest.mark.skip(reason="to_fix")  # FIXME
     def test_solves_resistance_from_c_and_fc(self):
         """
@@ -164,7 +178,7 @@ class TestFilterElectricalRC:
         Given: C = 100nF, fc = 1kHz
         Expected: R = 1 / (2 * pi * C * fc) ≈ 1591.5 Ω
         """
-        from faebryk.core.solver.solver import Solver
+        from faebryk.core.solver import Solver
         from faebryk.libs.test.boundexpressions import BoundExpressions
 
         E = BoundExpressions()
@@ -176,26 +190,36 @@ class TestFilterElectricalRC:
         C_value = 100e-9  # 100nF in Farads
         fc_value = 1000  # 1kHz in Hz
 
-        # Get the parameter operands from the filter
-        C_param = rc_filter.capacitor.get().capacitance.get().can_be_operand.get()
-        fc_param = rc_filter.filter.get().cutoff_frequency.get().can_be_operand.get()
-        R_param = rc_filter.resistor.get().resistance.get().can_be_operand.get()
+        # Get the parameters from the filter
+        C_param = rc_filter.capacitor.get().capacitance.get()
+        fc_param = rc_filter.filter.get().cutoff_frequency.get()
+        R_param = rc_filter.resistor.get().resistance.get()
 
         # Constrain C and fc
-        E.is_subset(C_param, E.lit_op_single((C_value, E.U.Fa)), assert_=True)
-        E.is_subset(fc_param, E.lit_op_single((fc_value, E.U.Hz)), assert_=True)
+        E.is_subset(
+            C_param.can_be_operand.get(),
+            E.lit_op_single((C_value, E.U.Fa)),
+            assert_=True,
+        )
+        E.is_subset(
+            fc_param.can_be_operand.get(),
+            E.lit_op_single((fc_value, E.U.Hz)),
+            assert_=True,
+        )
 
         # Manually calculate expected resistance: R = 1 / (2 * pi * C * fc)
         expected_R = 1 / (2 * math.pi * C_value * fc_value)
 
         # Run solver
         solver = Solver()
-        solver.simplify_for(C_param, fc_param, R_param)
+        solver.simplify_for(
+            C_param.is_parameter.get(),
+            fc_param.is_parameter.get(),
+            R_param.is_parameter.get(),
+        )
 
         # Get solver's result for R
-        result = solver.extract_superset(
-            R_param.as_parameter_operatable.force_get().as_parameter.force_get()
-        )
+        result = solver.extract_superset(R_param.is_parameter.get())
         assert result is not None, "Solver should find resistance"
 
         # Get the Numbers node from the result
@@ -210,6 +234,7 @@ class TestFilterElectricalRC:
             f"Expected R ≈ {expected_R:.2f} Ω, got {result_numbers.pretty_str()}"
         )
 
+    @pytest.mark.full_solver_only
     @pytest.mark.skip(reason="to_fix")  # FIXME
     def test_solves_capacitance_from_r_and_fc(self):
         """
@@ -218,7 +243,7 @@ class TestFilterElectricalRC:
         Given: R = 10kΩ, fc = 10kHz
         Expected: C = 1 / (2 * pi * R * fc) ≈ 1.59nF
         """
-        from faebryk.core.solver.solver import Solver
+        from faebryk.core.solver import Solver
         from faebryk.libs.test.boundexpressions import BoundExpressions
 
         E = BoundExpressions()
@@ -229,26 +254,36 @@ class TestFilterElectricalRC:
         R_value = 10000  # 10kΩ in Ohms
         fc_value = 10000  # 10kHz in Hz
 
-        # Get the parameter operands
-        C_param = rc_filter.capacitor.get().capacitance.get().can_be_operand.get()
-        fc_param = rc_filter.filter.get().cutoff_frequency.get().can_be_operand.get()
-        R_param = rc_filter.resistor.get().resistance.get().can_be_operand.get()
+        # Get the parameters
+        C_param = rc_filter.capacitor.get().capacitance.get()
+        fc_param = rc_filter.filter.get().cutoff_frequency.get()
+        R_param = rc_filter.resistor.get().resistance.get()
 
         # Constrain R and fc
-        E.is_subset(R_param, E.lit_op_single((R_value, E.U.Ohm)), assert_=True)
-        E.is_subset(fc_param, E.lit_op_single((fc_value, E.U.Hz)), assert_=True)
+        E.is_subset(
+            R_param.can_be_operand.get(),
+            E.lit_op_single((R_value, E.U.Ohm)),
+            assert_=True,
+        )
+        E.is_subset(
+            fc_param.can_be_operand.get(),
+            E.lit_op_single((fc_value, E.U.Hz)),
+            assert_=True,
+        )
 
         # Manually calculate expected capacitance: C = 1 / (2 * pi * R * fc)
         expected_C = 1 / (2 * math.pi * R_value * fc_value)
 
         # Run solver
         solver = Solver()
-        solver.simplify_for(R_param, fc_param, C_param)
+        solver.simplify_for(
+            R_param.is_parameter.get(),
+            fc_param.is_parameter.get(),
+            C_param.is_parameter.get(),
+        )
 
         # Get solver's result for C
-        result = solver.extract_superset(
-            C_param.as_parameter_operatable.force_get().as_parameter.force_get()
-        )
+        result = solver.extract_superset(C_param.is_parameter.get())
         assert result is not None, "Solver should find capacitance"
 
         # Get the Numbers node from the result
@@ -268,7 +303,7 @@ class TestFilterElectricalRC:
         Test that FilterElectricalRC correctly sets filter response to LOWPASS
         and order to 1.
         """
-        from faebryk.core.solver.solver import Solver
+        from faebryk.core.solver import Solver
         from faebryk.libs.test.boundexpressions import BoundExpressions
 
         E = BoundExpressions()
@@ -282,33 +317,21 @@ class TestFilterElectricalRC:
         # Run solver to resolve constraints
         solver = Solver()
         solver.simplify_for(
-            response_param.can_be_operand.get(),
-            order_param.can_be_operand.get(),
+            response_param.is_parameter.get(),
+            order_param.is_parameter.get(),
         )
 
         # Check response is constrained to LOWPASS
-        response_result = solver.extract_superset(
-            response_param.can_be_operand.get()
-            .as_parameter_operatable.force_get()
-            .as_parameter.force_get()
-        )
+        response_result = solver.extract_superset(response_param.is_parameter.get())
         assert response_result is not None, "Solver should find response"
-        response_enum = (
-            fabll.Traits(response_result)
-            .get_obj_raw()
-            .try_cast(F.Literals.AbstractEnums)
-        )
+        response_enum = F.Literals.AbstractEnums.try_cast_to_enum(response_result)
         assert response_enum is not None, "Response should be an enum literal"
         assert response_enum.get_values() == [F.Filter.Response.LOWPASS.value], (
             f"Expected LOWPASS, got {response_enum.get_values()}"
         )
 
         # Check order is constrained to 1
-        order_result = solver.extract_superset(
-            order_param.can_be_operand.get()
-            .as_parameter_operatable.force_get()
-            .as_parameter.force_get()
-        )
+        order_result = solver.extract_superset(order_param.is_parameter.get())
         assert order_result is not None, "Solver should find order"
         order_numbers = (
             fabll.Traits(order_result).get_obj_raw().try_cast(F.Literals.Numbers)

@@ -4,14 +4,14 @@ import logging
 import math
 import string
 from itertools import pairwise
-from typing import Callable, cast
+from typing import Callable
 
 import pytest
 
 import faebryk.core.node as fabll
 import faebryk.library._F as F
+from faebryk.core.solver import Solver
 from faebryk.core.solver.mutator import MutationMap
-from faebryk.core.solver.solver import Solver
 from faebryk.core.solver.symbolic.invariants import AliasClass
 from faebryk.core.solver.symbolic.pure_literal import exec_pure_literal_expression
 from faebryk.core.solver.utils import Contradiction
@@ -97,7 +97,7 @@ def _extract_and_check(
         if not matches:
             print(
                 f"Expected {expected}"
-                f" but got {extracted.pretty_str()}"
+                f" but got {extracted.pretty_repr()}"
                 f"\nfor op: {op.as_parameter_operatable.force_get().compact_repr()}"
             )
         return matches
@@ -105,8 +105,8 @@ def _extract_and_check(
     matches = extracted.op_setic_equals(expected.as_literal.force_get())
     if not matches:
         print(
-            f"Expected {expected.as_literal.force_get().pretty_str()}"
-            f" but got {extracted.pretty_str()}"
+            f"Expected {expected.as_literal.force_get().pretty_repr()}"
+            f" but got {extracted.pretty_repr()}"
             f"\nfor op: {op.pretty()}"
         )
     return matches
@@ -144,6 +144,7 @@ def _find_class_expression_force(
     return e
 
 
+@pytest.mark.full_solver_only
 def test_solve_phase_one():
     solver = Solver()
     E = BoundExpressions()
@@ -179,6 +180,7 @@ def test_solve_phase_one():
     )
 
 
+@pytest.mark.full_solver_only
 @pytest.mark.skip("since 0.14.0, fix in 0.14.1")
 def test_simplify():
     """
@@ -240,6 +242,7 @@ def test_simplify():
     assert set(out_ops) == {H_mapped, I_mapped, J_mapped}
 
 
+@pytest.mark.full_solver_only
 def test_simplify_logic_and():
     """
     X = And(And(And(And(p0, True), p1), p2), p3)
@@ -298,7 +301,9 @@ def test_shortcircuit_logic_and():
     solver = Solver()
 
     with pytest.raises(Contradiction):
-        solver.simplify(E.tg, E.g)
+        solver.simplify_for(
+            p0.as_parameter_operatable.force_get().as_parameter.force_get()
+        )
 
 
 def test_shortcircuit_logic_or():
@@ -335,6 +340,7 @@ def test_inequality_to_set():
     assert _extract_and_check(p0, solver, E.lit_op_range((1, 2)))
 
 
+@pytest.mark.full_solver_only
 def test_subset_of_literal():
     E = BoundExpressions()
     p0, p1, p2 = (
@@ -356,6 +362,7 @@ def test_subset_of_literal():
     #     ) == E.lit_op_range((0.0, 0.0))
 
 
+@pytest.mark.full_solver_only
 def test_alias_classes():
     """
     A is! B
@@ -434,6 +441,7 @@ def test_solve_realworld_biggest():
     # pick_part_recursively(app, solver)
 
 
+@pytest.mark.full_solver_only
 def test_inspect_known_superranges():
     E = BoundExpressions()
     p0 = E.parameter_op(
@@ -470,7 +478,10 @@ def test_obvious_contradiction_by_literal():
 
     solver = Solver()
     with pytest.raises(Contradiction):
-        solver.simplify(E.tg, E.g)
+        solver.simplify_for(
+            p0.as_parameter_operatable.force_get().as_parameter.force_get(),
+            p1.as_parameter_operatable.force_get().as_parameter.force_get(),
+        )
 
 
 def test_subset_superset():
@@ -492,7 +503,10 @@ def test_subset_superset():
 
     solver = Solver()
     with pytest.raises(Contradiction):
-        solver.simplify(E.tg, E.g)
+        solver.simplify_for(
+            A.as_parameter_operatable.force_get().as_parameter.force_get(),
+            B.as_parameter_operatable.force_get().as_parameter.force_get(),
+        )
 
 
 def test_subset_single_alias():
@@ -502,10 +516,10 @@ def test_subset_single_alias():
     E.is_subset(A, E.lit_op_single((1, E.U.V)), assert_=True)
 
     solver = Solver()
-    repr_map = solver.simplify(E.tg, E.g).data.mutation_map
-    assert _extract_and_check(A, repr_map, E.lit_op_single((1, E.U.V)))
+    assert _extract_and_check(A, solver, E.lit_op_single((1, E.U.V)))
 
 
+@pytest.mark.full_solver_only
 def test_very_simple_alias_class():
     """
     A is! B
@@ -548,10 +562,13 @@ def test_domain():
     E.is_subset(p0, E.lit_op_range(((15, E.U.V), (20, E.U.V))), assert_=True)
 
     solver = Solver()
-    with pytest.raises(Contradiction, match="Empty superset"):
-        solver.simplify(E.tg, E.g)
+    with pytest.raises(Contradiction, match="(?i)empty superset"):
+        solver.simplify_for(
+            p0.as_parameter_operatable.force_get().as_parameter.force_get()
+        )
 
 
+@pytest.mark.full_solver_only
 def test_less_obvious_contradiction_by_literal():
     E = BoundExpressions()
     A = E.parameter_op(units=E.U.V)
@@ -571,6 +588,7 @@ def test_less_obvious_contradiction_by_literal():
         solver.simplify(E.tg, E.g)
 
 
+@pytest.mark.full_solver_only
 def test_symmetric_inequality_correlated():
     E = BoundExpressions()
     p0 = E.parameter_op(units=E.U.V)
@@ -650,6 +668,7 @@ def test_super_simple_literal_folding(
     assert _extract_and_check(p.as_operand.get(), solver, expected)
 
 
+@pytest.mark.full_solver_only
 def test_collect_factors_basic():
     """
     expr := A + (A * 2) + (A * 5) + B
@@ -696,6 +715,7 @@ def test_collect_factors_basic():
     )
 
 
+@pytest.mark.full_solver_only
 def test_literal_folding_add_multiplicative_1():
     """
     expr := (A + (A * 2) + (A * 5) + B + (A * B * 2)) - B
@@ -766,6 +786,7 @@ def test_literal_folding_add_multiplicative_1():
         assert found, f"Expected Multiply with ops={expected_ops}, lit={expected_lit}"
 
 
+@pytest.mark.full_solver_only
 def test_literal_folding_add_multiplicative_2():
     """
     expr := A + (A * 2) + 10 + (5 * A) + 0 + B
@@ -853,10 +874,10 @@ def test_transitive_subset():
     E.is_subset(C, E.lit_op_range((0, 10)), assert_=True)
 
     solver = Solver()
-    repr_map = solver.simplify(E.tg, E.g).data.mutation_map
-    assert _extract_and_check(A, repr_map, E.lit_op_range((0, 10)))
+    assert _extract_and_check(A, solver, E.lit_op_range((0, 10)))
 
 
+@pytest.mark.full_solver_only
 def test_nested_additions():
     E = BoundExpressions()
     A = E.parameter_op()
@@ -878,6 +899,7 @@ def test_nested_additions():
     assert _extract_and_check(D, repr_map, 3)
 
 
+@pytest.mark.full_solver_only
 def test_combined_add_and_multiply_with_ranges():
     E = BoundExpressions()
     A = E.parameter_op()
@@ -894,6 +916,7 @@ def test_combined_add_and_multiply_with_ranges():
     )
 
 
+@pytest.mark.full_solver_only
 def test_voltage_divider_find_v_out_no_division():
     E = BoundExpressions()
     r_top = E.parameter_op()
@@ -919,6 +942,7 @@ def test_voltage_divider_find_v_out_no_division():
     assert _extract_and_check(v_out, solver, E.lit_op_range((0.45, 50)))
 
 
+@pytest.mark.full_solver_only
 def test_voltage_divider_find_v_out_with_division():
     E = BoundExpressions()
     r_top = E.parameter_op()
@@ -939,6 +963,7 @@ def test_voltage_divider_find_v_out_with_division():
     assert _extract_and_check(v_out, solver, E.lit_op_range((0.45, 50)))
 
 
+@pytest.mark.full_solver_only
 def test_voltage_divider_find_v_out_single_variable_occurrences():
     E = BoundExpressions()
     r_top = E.parameter_op()
@@ -987,6 +1012,7 @@ def test_voltage_divider_find_v_in():
     assert _extract_and_check(v_in, solver, E.lit_op_range((1.8, 200)))
 
 
+@pytest.mark.full_solver_only
 def test_voltage_divider_find_resistances():
     E = BoundExpressions()
     r_top = E.parameter_op(units=E.U.Ohm, name="r_top")
@@ -1045,6 +1071,7 @@ def test_voltage_divider_find_r_top(request: pytest.FixtureRequest):
     )
 
 
+@pytest.mark.full_solver_only
 def test_voltage_divider_reject_invalid_r_top():
     E = BoundExpressions()
     r_top = E.parameter_op(units=E.U.Ohm)
@@ -1080,12 +1107,12 @@ def test_base_unit_switch():
     E.greater_or_equal(A, E.lit_op_single((0.100, E.U.As)), assert_=True)
 
     solver = Solver()
-    repr_map = solver.simplify(E.tg, E.g).data.mutation_map
     assert _extract_and_check(
-        A, repr_map, E.lit_op_range(((0.100, E.U.As), (0.600, E.U.As)))
+        A, solver, E.lit_op_range(((0.100, E.U.As), (0.600, E.U.As)))
     )
 
 
+@pytest.mark.full_solver_only
 def test_congruence_filter():
     E = BoundExpressions()
 
@@ -1139,6 +1166,7 @@ def test_inspect_enum_led():
     )
 
 
+@pytest.mark.easyeda
 @pytest.mark.usefixtures("setup_project_config")
 def test_jlcpcb_pick_resistor():
     E = BoundExpressions()
@@ -1156,6 +1184,7 @@ def test_jlcpcb_pick_resistor():
     print(resistor.get_trait(F.Pickable.has_part_picked).get_part())
 
 
+@pytest.mark.easyeda
 @pytest.mark.usefixtures("setup_project_config")
 def test_jlcpcb_pick_capacitor():
     E = BoundExpressions()
@@ -1178,6 +1207,7 @@ def test_jlcpcb_pick_capacitor():
     print(capacitor.get_trait(F.Pickable.has_part_picked).get_part())
 
 
+@pytest.mark.easyeda
 @pytest.mark.skip(reason="xfail")  # TODO: add support for leds
 def test_jlcpcb_pick_led():
     E = BoundExpressions()
@@ -1200,6 +1230,7 @@ def test_jlcpcb_pick_led():
     print(led.get_trait(F.Pickable.has_part_picked).get_part())
 
 
+@pytest.mark.easyeda
 @pytest.mark.skip(reason="xfail")  # TODO: swap for test without PoweredLED
 def test_jlcpcb_pick_powered_led_simple():
     # TODO: add support for powered leds
@@ -1222,6 +1253,7 @@ def test_jlcpcb_pick_powered_led_simple():
     # print([(p, p.get_trait(F.has_part_picked).get_part()) for p in picked_parts])
 
 
+@pytest.mark.easyeda
 @pytest.mark.skip(reason="xfail")  # TODO: swap for test without PoweredLED
 def test_jlcpcb_pick_powered_led_regression():
     # TODO: add support for powered leds
@@ -1341,6 +1373,7 @@ def test_param_isolation():
         F.Expressions.Divide.c,
     ],
 )
+@pytest.mark.full_solver_only
 def test_extracted_literal_folding(
     op: Callable[..., F.Parameters.can_be_operand],
 ):
@@ -1372,6 +1405,7 @@ def test_extracted_literal_folding(
     assert _extract_and_check(C, solver, lito)
 
 
+@pytest.mark.full_solver_only
 def test_fold_pow():
     E = BoundExpressions()
     A = E.parameter_op()
@@ -1386,15 +1420,14 @@ def test_fold_pow():
     E.is_(B, E.power(A, lit_operand_op), assert_=True)
 
     solver = Solver()
-    repr_map = solver.simplify(E.tg, E.g).data.mutation_map
-
     assert _extract_and_check(
         B,
-        repr_map,
+        solver,
         lit.op_pow_intervals(lit_operand),
     )
 
 
+@pytest.mark.full_solver_only
 def test_graph_split():
     E = BoundExpressions()
 
@@ -1442,12 +1475,11 @@ def test_ss_single_into_alias():
     _ = E.add(A, B)
 
     solver = Solver()
-    repr_map = solver.simplify(E.tg, E.g).data.mutation_map
-
-    assert _extract_and_check(B, repr_map, 5)
-    assert _extract_and_check(A, repr_map, E.lit_op_range((5, 10)))
+    assert _extract_and_check(B, solver, 5)
+    assert _extract_and_check(A, solver, E.lit_op_range((5, 10)))
 
 
+@pytest.mark.full_solver_only
 @pytest.mark.parametrize(
     "op, invert",
     [
@@ -1494,6 +1526,7 @@ def test_find_contradiction_by_predicate(
         solver.simplify(E.tg, E.g)
 
 
+@pytest.mark.full_solver_only
 def test_find_contradiction_by_gt():
     E = BoundExpressions()
     A = E.parameter_op()
@@ -1509,6 +1542,7 @@ def test_find_contradiction_by_gt():
         solver.simplify(E.tg, E.g)
 
 
+@pytest.mark.full_solver_only
 def test_can_add_parameters():
     E = BoundExpressions()
     A = E.parameter_op()
@@ -1534,9 +1568,8 @@ def test_ss_estimation_ge():
     E.greater_or_equal(B, A, assert_=True)
 
     solver = Solver()
-    res = solver.simplify(E.tg, E.g)
     assert _extract_and_check(
-        B, res.data.mutation_map, E.lit_op_range((10, math.inf)), allow_subset=True
+        B, solver, E.lit_op_range((10, math.inf)), allow_subset=True
     )
 
 
@@ -1690,6 +1723,7 @@ def test_congruence_lits(
     assert (uncorrelated_congruent, correlated_congruent) == expected
 
 
+@pytest.mark.full_solver_only
 def test_fold_literals():
     E = BoundExpressions()
     A = E.parameter_op()
@@ -1699,6 +1733,7 @@ def test_fold_literals():
     assert _extract_and_check(A, solver, E.lit_op_range((0, 20)))
 
 
+@pytest.mark.full_solver_only
 def test_implication():
     """
     A is [5, 10]
@@ -1732,11 +1767,12 @@ def test_implication():
     )
 
 
+@pytest.mark.full_solver_only
 @pytest.mark.parametrize("A_value", [5, 10, 15])
 def test_mapping(A_value: int):
     E = BoundExpressions()
-    A = E.parameter_op()
-    B = E.parameter_op()
+    A_op = E.parameter_op()
+    B_op = E.parameter_op()
 
     X = E.lit_op_range_from_center_rel((100, E.U.dl), 0.1).as_literal.force_get()
     Y = E.lit_op_range_from_center_rel((200, E.U.dl), 0.1).as_literal.force_get()
@@ -1748,14 +1784,129 @@ def test_mapping(A_value: int):
         E.lit_op_single(10).as_literal.force_get(): Y,
         E.lit_op_single(15).as_literal.force_get(): Z,
     }
-    F.Expressions.Mapping.from_operands(A, B, mapping=mapping_literals, assert_=True)
+    F.Expressions.Mapping.from_operands(
+        A_op, B_op, mapping=mapping_literals, assert_=True
+    )
 
-    E.is_subset(A, E.lit_op_single(A_value), assert_=True)
+    E.is_subset(A_op, E.lit_op_single(A_value), assert_=True)
 
     solver = Solver()
-    res = cast(Solver.SolverState, solver.simplify_for(A, B))
-    assert _extract_and_check(A, res.data.mutation_map, A_value)
-    assert _extract_and_check(B, res.data.mutation_map, mapping[A_value])
+    solver.simplify_for(
+        A_op.as_parameter_operatable.force_get().as_parameter.force_get(),
+        B_op.as_parameter_operatable.force_get().as_parameter.force_get(),
+    )
+    assert _extract_and_check(A_op, solver, A_value)
+    assert _extract_and_check(B_op, solver, mapping[A_value])
+
+
+@pytest.mark.full_solver_only
+@pytest.mark.parametrize("A_value", [5, 10, 15])
+def test_mapping_makechild(A_value: int):
+    """Same as test_mapping but using the declarative MakeChild pattern."""
+    E = BoundExpressions()
+
+    X = E.lit_op_range_from_center_rel((100, E.U.dl), 0.1).as_literal.force_get()
+    Y = E.lit_op_range_from_center_rel((200, E.U.dl), 0.1).as_literal.force_get()
+    Z = E.lit_op_range_from_center_rel((300, E.U.dl), 0.1).as_literal.force_get()
+
+    mapping_expected = {5: X, 10: Y, 15: Z}
+
+    class _App(fabll.Node):
+        A = F.Parameters.NumericParameter.MakeChild(unit=E.U.dl)
+        B = F.Parameters.NumericParameter.MakeChild(unit=E.U.dl)
+
+        _constraints = [
+            F.Expressions.Mapping.MakeChild(
+                left=[A],
+                right=[B],
+                mapping=[
+                    (
+                        F.Literals.Numbers.MakeChild_SingleValue(5),
+                        F.Literals.Numbers.MakeChild_FromCenterRel(100, 0.1),
+                    ),
+                    (
+                        F.Literals.Numbers.MakeChild_SingleValue(10),
+                        F.Literals.Numbers.MakeChild_FromCenterRel(200, 0.1),
+                    ),
+                    (
+                        F.Literals.Numbers.MakeChild_SingleValue(15),
+                        F.Literals.Numbers.MakeChild_FromCenterRel(300, 0.1),
+                    ),
+                ],
+            ),
+        ]
+
+    app = _App.bind_typegraph(tg=E.tg).create_instance(g=E.g)
+
+    A = app.A.get()
+    B = app.B.get()
+
+    E.is_subset(A.can_be_operand.get(), E.lit_op_single(A_value), assert_=True)
+
+    solver = Solver()
+    solver.simplify_for(A.is_parameter.get(), B.is_parameter.get())
+    assert _extract_and_check(A.can_be_operand.get(), solver, A_value)
+    assert _extract_and_check(B.can_be_operand.get(), solver, mapping_expected[A_value])
+
+
+@pytest.mark.full_solver_only
+@pytest.mark.parametrize("A_value", [5, 10, 15])
+def test_mapping_makechild_expression_condition(A_value: int):
+    """Like test_mapping_makechild but with pre-built IsSubset conditions."""
+    E = BoundExpressions()
+
+    X = E.lit_op_range_from_center_rel((100, E.U.dl), 0.1).as_literal.force_get()
+    Y = E.lit_op_range_from_center_rel((200, E.U.dl), 0.1).as_literal.force_get()
+    Z = E.lit_op_range_from_center_rel((300, E.U.dl), 0.1).as_literal.force_get()
+
+    mapping_expected = {5: X, 10: Y, 15: Z}
+
+    class _App(fabll.Node):
+        A = F.Parameters.NumericParameter.MakeChild(unit=E.U.dl)
+        B = F.Parameters.NumericParameter.MakeChild(unit=E.U.dl)
+
+        _constraints = [
+            F.Expressions.Mapping.MakeChild(
+                right=[B],
+                mapping=[
+                    (
+                        _cond_5 := F.Expressions.IsSubset.MakeChild(
+                            [A],
+                            [_lit_5 := F.Literals.Numbers.MakeChild_SingleValue(5)],
+                        ),
+                        F.Literals.Numbers.MakeChild_FromCenterRel(100, 0.1),
+                    ),
+                    (
+                        _cond_10 := F.Expressions.IsSubset.MakeChild(
+                            [A],
+                            [_lit_10 := F.Literals.Numbers.MakeChild_SingleValue(10)],
+                        ),
+                        F.Literals.Numbers.MakeChild_FromCenterRel(200, 0.1),
+                    ),
+                    (
+                        _cond_15 := F.Expressions.IsSubset.MakeChild(
+                            [A],
+                            [_lit_15 := F.Literals.Numbers.MakeChild_SingleValue(15)],
+                        ),
+                        F.Literals.Numbers.MakeChild_FromCenterRel(300, 0.1),
+                    ),
+                ],
+            ),
+        ]
+
+    app = _App.bind_typegraph(tg=E.tg).create_instance(g=E.g)
+
+    A = app.A.get()
+    B = app.B.get()
+    A_op = A.can_be_operand.get()
+    B_op = B.can_be_operand.get()
+
+    E.is_subset(A_op, E.lit_op_single(A_value), assert_=True)
+
+    solver = Solver()
+    solver.simplify_for(A.is_parameter.get(), B.is_parameter.get())
+    assert _extract_and_check(A_op, solver, A_value)
+    assert _extract_and_check(B_op, solver, mapping_expected[A_value])
 
 
 @pytest.mark.parametrize("op", [F.Expressions.Subtract.c, F.Expressions.Add.c])
@@ -1787,9 +1938,12 @@ def test_canonical_subtract_zero():
     )
 
     solver = Solver()
-    res = cast(Solver.SolverState, solver.simplify_for(A, B))
-    assert _extract_and_check(A, res.data.mutation_map, 0)
-    assert _extract_and_check(B, res.data.mutation_map, 1)
+    solver.simplify_for(
+        A.as_parameter_operatable.force_get().as_parameter.force_get(),
+        B.as_parameter_operatable.force_get().as_parameter.force_get(),
+    )
+    assert _extract_and_check(A, solver, 0)
+    assert _extract_and_check(B, solver, 1)
 
 
 def test_nested_fold_scalar():
@@ -1824,6 +1978,7 @@ def test_regression_lit_mul_fold_powers():
     assert _extract_and_check(A, solver, 2**-0.5)
 
 
+@pytest.mark.full_solver_only
 def test_nested_fold_interval():
     E = BoundExpressions()
     A = E.parameter_op()
@@ -1845,6 +2000,7 @@ def test_nested_fold_interval():
     assert _extract_and_check(A, solver, E.lit_op_range((5.76, 8.36)))
 
 
+@pytest.mark.full_solver_only
 def test_simplify_non_terminal_manual_test_1():
     """
     Test that non-terminal simplification works
@@ -1865,6 +2021,7 @@ def test_simplify_non_terminal_manual_test_1():
     solver.simplify(E.tg, E.g, terminal=True)
 
 
+@pytest.mark.full_solver_only
 @pytest.mark.skip(reason="to_fix")  # FIXME
 def test_simplify_non_terminal_manual_test_2():
     """
@@ -1891,12 +2048,12 @@ def test_simplify_non_terminal_manual_test_2():
         )
 
     solver = Solver()
-    solver.simplify_for(*[p.as_operand.get() for p in ps], terminal=False)
+    solver.simplify_for(*[p.as_parameter.force_get() for p in ps], terminal=False)
 
     origin = 1, E.lit_op_range(((9, E.U.V), (11, E.U.V)))
     E.is_subset(ps[origin[0]].as_operand.get(), (origin[1]), assert_=True)
 
-    solver.simplify_for(*[p.as_operand.get() for p in ps])
+    solver.simplify_for(*[p.as_parameter.force_get() for p in ps])
     for i, p in enumerate(ps):
         # _inc = increase ** (i - origin[0])
         _inc = E.lit_op_single(1)
@@ -1923,6 +2080,7 @@ def test_simplify_non_terminal_manual_test_2():
 # extra formula
 # C.alias_is(1 / (4 * math.pi**2 * Li * fc**2))
 # TODO test with only fc given
+@pytest.mark.full_solver_only
 @pytest.mark.skip(reason="xfail")  # TODO: Need more powerful expression reordering
 def test_abstract_lowpass_ss():
     E = BoundExpressions()
@@ -2019,6 +2177,7 @@ def test_min_max_multi():
     assert _extract_and_check(p1, solver, E.lit_op_single((15, E.U.V)))
 
 
+@pytest.mark.full_solver_only
 @pytest.mark.skip(
     reason="xfail"
 )  # Behaviour not implemented https://github.com/atopile/atopile/issues/615
@@ -2046,6 +2205,7 @@ def test_symmetric_inequality_uncorrelated():
         solver.simplify(E.tg, E.g)
 
 
+@pytest.mark.full_solver_only
 def test_fold_correlated():
     """
     ```
@@ -2192,6 +2352,7 @@ _A: list[
 ]
 
 
+@pytest.mark.full_solver_only
 @pytest.mark.parametrize(
     "op_factory, lits_factory, expected_factory",
     _A,
@@ -2341,6 +2502,7 @@ def test_solve_voltage_divider_complex():
     # assert solver_total_current == res_total_current
 
 
+@pytest.mark.full_solver_only
 def test_correlated_direct_contradiction():
     """
     Anticorrelated(A, B) and Not(Anticorrelated(A, B)) should contradict.
@@ -2357,6 +2519,7 @@ def test_correlated_direct_contradiction():
         solver.simplify(E.tg, E.g)
 
 
+@pytest.mark.full_solver_only
 def test_correlated_direct_contradiction_multi():
     """
     Anticorrelated(A, B, C) and Not(Anticorrelated(A, B, C)) should contradict.
@@ -2374,6 +2537,7 @@ def test_correlated_direct_contradiction_multi():
         solver.simplify(E.tg, E.g)
 
 
+@pytest.mark.full_solver_only
 def test_correlated_no_contradiction_different_sets():
     """
     Anticorrelated(A, B) and Not(Anticorrelated(A, C)) should NOT contradict.
@@ -2392,6 +2556,7 @@ def test_correlated_no_contradiction_different_sets():
 
 
 # Lower estimation tests ---------------------------------------------------------------
+@pytest.mark.full_solver_only
 def test_lower_estimation_with_uncorrelated_params():
     """
     When parameters are marked as uncorrelated via Anticorrelated(...),
@@ -2438,6 +2603,7 @@ def test_lower_estimation_with_uncorrelated_params():
     assert max_val >= 9, f"Expected max >= 9, got {max_val}"
 
 
+@pytest.mark.full_solver_only
 def test_lower_estimation_skipped_when_correlated():
     """
     When parameters are NOT marked as uncorrelated (default is anticorrelated),
@@ -2485,6 +2651,7 @@ def test_lower_estimation_skipped_when_correlated():
         )
 
 
+@pytest.mark.full_solver_only
 def test_lower_estimation_multiply_uncorrelated():
     """
     Test lower estimation with multiplication of uncorrelated parameters.
@@ -2525,6 +2692,7 @@ def test_lower_estimation_multiply_uncorrelated():
     assert max_val >= 15, f"Expected max >= 15, got {max_val}"
 
 
+@pytest.mark.full_solver_only
 def test_lower_estimation_partial_uncorrelation():
     """
     Test that lower estimation requires ALL parameters to be pairwise anticorrelated.
@@ -2591,6 +2759,7 @@ def test_fold_not_contradiction():
         _extract_and_check(e1, solver, False)
 
 
+@pytest.mark.full_solver_only
 def test_solver_continuation_after_constraint_addition():
     """
     Test the picking scenario: initial solve -> add constraint -> re-solve.
@@ -2653,6 +2822,7 @@ def test_solver_continuation_after_constraint_addition():
     print("==========================================\n")
 
 
+@pytest.mark.full_solver_only
 def test_solver_continuation_multi_pick_scenario():
     """
     Test a more realistic picking scenario with multiple components.
@@ -2993,6 +3163,7 @@ def test_is_non_constraining_method():
 # ── Solver.commit() tests ────────────────────────────────────────────────────
 
 
+@pytest.mark.full_solver_only
 def test_commit_basic_superset():
     """After commit, the original parameter should have a superset constraint."""
     E = BoundExpressions()
@@ -3018,6 +3189,7 @@ def test_commit_basic_superset():
     )
 
 
+@pytest.mark.full_solver_only
 def test_commit_subset():
     """After commit, constrained subsets should appear on the original parameter."""
     E = BoundExpressions()
@@ -3041,6 +3213,7 @@ def test_commit_subset():
     assert lit_range.op_setic_is_subset_of(sb)
 
 
+@pytest.mark.full_solver_only
 def test_commit_aliases():
     """Parameters aliased by the solver should get Is constraints after commit."""
     E = BoundExpressions()
@@ -3069,6 +3242,7 @@ def test_commit_aliases():
     assert b_ss is not None
 
 
+@pytest.mark.full_solver_only
 def test_commit_idempotent():
     """Calling commit twice should not break anything."""
     E = BoundExpressions()
@@ -3096,6 +3270,7 @@ def test_commit_idempotent():
     assert ss2 is not None
 
 
+@pytest.mark.full_solver_only
 def test_commit_raises_without_solve():
     """Commit should raise if solver hasn't been run."""
     solver = Solver()

@@ -3,6 +3,7 @@ const pyzig = @import("pyzig");
 const faebryk = @import("faebryk");
 const graph_mod = @import("graph");
 const graph_py = @import("../graph/graph_py.zig");
+const cast = pyzig.cast;
 
 const py = pyzig.pybindings;
 const bind = pyzig.pyzig;
@@ -4937,7 +4938,7 @@ fn wrap_typegraph_make_child_node(root: *py.PyObject) void {
 
 fn typegraph_dealloc(self: *py.PyObject) callconv(.c) void {
     const allocator = std.heap.c_allocator;
-    const wrapper = @as(*TypeGraphWrapper, @ptrCast(@alignCast(self)));
+    const wrapper = cast.ctx(TypeGraphWrapper, self);
     const tg_ptr = wrapper.data;
 
     // Don't destroy GraphView - it's managed by Python caller
@@ -4954,7 +4955,7 @@ fn typegraph_dealloc(self: *py.PyObject) callconv(.c) void {
 }
 
 fn typegraph_repr(self: *py.PyObject) callconv(.c) ?*py.PyObject {
-    const wrapper = @as(*TypeGraphWrapper, @ptrCast(@alignCast(self)));
+    const wrapper = cast.ctx(TypeGraphWrapper, self);
     const tg = wrapper.data;
 
     var buf: [128]u8 = undefined;
@@ -5020,7 +5021,7 @@ fn wrap_typegraph(root: *py.PyObject) void {
         }
         if (make_child_node_type) |mc_type| {
             if (tg_type.tp_dict) |dict_obj| {
-                const mc_obj = @as(*py.PyObject, @ptrCast(@alignCast(mc_type)));
+                const mc_obj = cast.ctx(py.PyObject, mc_type);
                 py.Py_INCREF(mc_obj);
                 if (py.PyDict_SetItemString(dict_obj, "MakeChildNode", mc_obj) != 0) {
                     py.Py_DECREF(mc_obj);
@@ -5432,7 +5433,7 @@ fn wrap_trait_visit_implementers() type {
                 had_error: bool = false,
 
                 pub fn call(ctx_ptr: *anyopaque, bound_node: graph.BoundNodeReference) visitor.VisitResult(void) {
-                    const inner_self: *@This() = @ptrCast(@alignCast(ctx_ptr));
+                    const inner_self = cast.ctx(@This(), ctx_ptr);
 
                     const node_obj = graph_py.makeBoundNodePyObject(bound_node) orelse {
                         inner_self.had_error = true;

@@ -13,7 +13,7 @@ import faebryk.core.node as fabll
 import faebryk.library._F as F
 from atopile.errors import UserInfraError
 from faebryk.core import graph
-from faebryk.core.solver.solver import Solver
+from faebryk.core.solver import Solver
 from faebryk.core.solver.utils import LOG_PICK_SOLVE
 from faebryk.libs.http import RequestError
 from faebryk.libs.picker.api.api import ApiHTTPError, get_api_client
@@ -27,6 +27,7 @@ from faebryk.libs.picker.api.models import (
 from faebryk.libs.picker.lcsc import (
     LCSC_NoDataException,
     LCSC_PinmapException,
+    LCSC_ServiceException,
     attach,
     check_attachable,
 )
@@ -82,18 +83,8 @@ BackendPackage = StrEnum(
 )
 
 
-def _from_smd_size(cls, size: SMDSize, type_node: graph.BoundNode) -> "BackendPackage":  # type: ignore[invalid-type-form]
-    type_name = fbrk.TypeGraph.get_type_name(type_node=type_node)
-
-    if type_name == F.Resistor._type_identifier():
-        prefix = "R"
-    elif type_name == F.Capacitor._type_identifier():
-        prefix = "C"
-    elif type_name == F.Inductor._type_identifier():
-        prefix = "L"
-    else:
-        raise NotImplementedError(f"Unsupported pickable trait: {type_node}")
-
+def _from_smd_size(cls, size: SMDSize, prefix: str | None = None) -> "BackendPackage":
+    prefix = prefix or ""
     try:
         return cls[f"{prefix}{size.imperial.without_prefix}"]
     except SMDSize.UnableToConvert:
@@ -148,7 +139,7 @@ def _prepare_query(
                 .create_instance(g=g)
                 .setup(
                     *[
-                        BackendPackage.from_smd_size(SMDSize[s], trait.pick_type)  # type: ignore[attr-defined]
+                        BackendPackage.from_smd_size(SMDSize[s], trait.package_prefix)  # type: ignore[attr-defined]
                         for s in F.Literals.AbstractEnums(
                             package_constraint.instance
                         ).get_names()
@@ -230,6 +221,11 @@ def _process_candidates(
             # If we found one that's ok, just continue since likely enough
             filtered_candidates.extend(it)
             break
+        except LCSC_ServiceException as ex:
+            raise PickError(
+                f"EasyEDA API is unavailable: {ex}",
+                component_node,
+            ) from ex
         except LCSC_NoDataException as ex:
             if len(candidates) == 1:
                 raise PickError(
@@ -334,6 +330,7 @@ def _attach(module: F.Pickable.is_pickable, c: Component):
         Component.ParseError,
         LCSC_NoDataException,
         LCSC_PinmapException,
+        LCSC_ServiceException,
     ) as e:
         if LOG_PICK_SOLVE:
             logger.warning(f"Failed to attach {c} to `{module}`: {e}")

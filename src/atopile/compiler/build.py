@@ -2,7 +2,8 @@
 Entry points for building from ato sources.
 """
 
-from collections.abc import Generator
+import time
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,8 +21,7 @@ from atopile.compiler import (
 from atopile.compiler import ast_types as AST
 from atopile.compiler.antlr_visitor import ANTLRVisitor
 from atopile.compiler.ast_visitor import (
-    STDLIB_ALLOWLIST,
-    AllowListT,
+    STDLIB_TYPES,
     ASTVisitor,
     BuildState,
 )
@@ -29,7 +29,7 @@ from atopile.compiler.gentypegraph import ImportRef
 from atopile.compiler.parse import parse_file, parse_text_as_file
 from atopile.compiler.parser.AtoParser import AtoParser
 from atopile.config import find_project_dir
-from atopile.errors import accumulate
+from atopile.errors import accumulate, iter_leaf_exceptions
 from faebryk.libs.util import import_from_path, once, unique
 
 
@@ -43,13 +43,15 @@ class BuildFileResult:
 class StdlibRegistry:
     """Lazy loader for stdlib types."""
 
-    def __init__(self, tg: fbrk.TypeGraph, allowlist: AllowListT | None = None) -> None:
+    def __init__(
+        self,
+        tg: fbrk.TypeGraph,
+        extra_types: set[type[fabll.Node]] | None = None,
+    ) -> None:
         self._tg = tg
         self._cache: dict[str, graph.BoundNode] = {}
-        self._allowlist = {
-            type_._type_identifier(): type_
-            for type_ in allowlist or STDLIB_ALLOWLIST.copy()
-        }
+        all_types = STDLIB_TYPES | (extra_types or set())
+        self._stdlib_types = {type_._type_identifier(): type_ for type_ in all_types}
         # Bootstrap has_source_chunk so Zig can find it during instantiation
         import faebryk.library._F as F
 
@@ -57,15 +59,15 @@ class StdlibRegistry:
 
     def get(self, name: str) -> graph.BoundNode:
         if name not in self._cache:
-            if name not in self._allowlist:
+            if name not in self._stdlib_types:
                 raise KeyError(f"Unknown stdlib type: {name}")
-            obj = self._allowlist[name]
+            obj = self._stdlib_types[name]
             type_node = fabll.TypeNodeBoundTG.get_or_create_type_in_tg(self._tg, obj)
             self._cache[name] = type_node
         return self._cache[name]
 
     def __contains__(self, name: str) -> bool:
-        return name in self._allowlist
+        return name in self._stdlib_types
 
 
 class TestStdlibRegistry:
@@ -193,6 +195,7 @@ class SearchPathResolver:
     3. Project `src` directory (from config, when known).
     4. Project `.ato/modules` directory (from config, when known).
     5. Project root directory (discovered via `find_project_dir`).
+    6. Stdlib `.ato` directory (`faebryk/library/`).
 
     Each candidate path is normalised (expanduser + resolve) and deduplicated. If the
     current project declares a package identifier and the import path starts with it,
@@ -217,6 +220,9 @@ class SearchPathResolver:
             getattr(project_paths, "root", None)
         )
         self._package_identifier: str | None = getattr(package_cfg, "identifier", None)
+        self._stdlib_ato_dir = (
+            Path(__file__).parent.parent.parent / "faebryk" / "library"
+        )
 
     @staticmethod
     def _normalize_path(path: Path) -> Path:
@@ -273,6 +279,10 @@ class SearchPathResolver:
         ):
             yield self._normalize_path(project_dir)
 
+        # Stdlib .ato files
+        if self._stdlib_ato_dir.exists():
+            yield self._stdlib_ato_dir
+
     @once
     def resolve(self, raw_path: str, base_file: Path | None) -> Path:
         # Package self-imports take precedence
@@ -314,6 +324,8 @@ class Linker:
         stdlib: StdlibRegistry,
         tg: fbrk.TypeGraph,
         extra_search_paths: Iterable[Path] | None = None,
+        source_overrides: Mapping[Path, str] | None = None,
+        linked_modules_seed: Mapping[Path, Mapping[str, graph.BoundNode]] | None = None,
     ) -> None:
         self._resolver = SearchPathResolver(
             config_obj, extra_search_paths=extra_search_paths or []
@@ -321,8 +333,15 @@ class Linker:
         self._stdlib = stdlib
         self._tg = tg
         self._active_paths: set[Path] = set()
-        self._linked_modules: dict[Path, dict[str, graph.BoundNode]] = {}
+        self._linked_modules: dict[Path, dict[str, graph.BoundNode]] = {
+            path: dict(type_roots)
+            for path, type_roots in (linked_modules_seed or {}).items()
+        }
         self._stdlib_ato_files = self._discover_stdlib_ato_files()
+        self._source_overrides = {
+            SearchPathResolver._normalize_path(path): source
+            for path, source in (source_overrides or {}).items()
+        }
 
     def _discover_stdlib_ato_files(self) -> dict[str, Path]:
         stdlib_ato_files = {}
@@ -359,10 +378,111 @@ class Linker:
         self, import_ref: ImportRef, build_state: BuildState
     ) -> fabll.Node | None:
         """Find the AST node that triggered this import."""
+        for ref, node in build_state.explicit_import_refs:
+            if ref == import_ref:
+                return node
         for _, ref, node, _ in build_state.external_type_refs:
             if ref == import_ref:
                 return node
         return None
+
+    def _find_import_source_node_for_ref(
+        self,
+        import_ref: ImportRef,
+        build_state: BuildState,
+        *,
+        prefer_path: bool = False,
+    ) -> fabll.Node | None:
+        source_node = self._find_import_node_for_ref(import_ref, build_state)
+        if (
+            prefer_path
+            and source_node is not None
+            and source_node.isinstance(AST.ImportStmt)
+            and import_ref.path is not None
+        ):
+            import_stmt = source_node.cast(AST.ImportStmt)
+            if import_stmt.get_path() is not None:
+                return import_stmt.path.get()
+        return source_node
+
+    def _build_path(
+        self,
+        *,
+        graph: graph.GraphView,
+        import_path: str,
+        source_path: Path,
+    ) -> BuildFileResult:
+        source_override = self._source_overrides.get(source_path)
+        if source_override is not None:
+            return build_source(
+                g=graph,
+                tg=self._tg,
+                source=source_override,
+                import_path=import_path,
+                source_path=source_path,
+            )
+        return build_file(
+            g=graph,
+            tg=self._tg,
+            import_path=import_path,
+            path=source_path,
+        )
+
+    @staticmethod
+    def _record_compiled_file_timing(
+        build_state: BuildState, source_path: Path, elapsed_ms: float
+    ) -> None:
+        path_key = str(source_path.resolve())
+        build_state.compiled_file_timings_ms[path_key] = round(
+            build_state.compiled_file_timings_ms.get(path_key, 0.0) + elapsed_ms,
+            1,
+        )
+
+    @staticmethod
+    def _merge_compiled_file_timings(
+        build_state: BuildState, child_state: BuildState
+    ) -> None:
+        for path_key, elapsed_ms in child_state.compiled_file_timings_ms.items():
+            build_state.compiled_file_timings_ms[path_key] = round(
+                build_state.compiled_file_timings_ms.get(path_key, 0.0) + elapsed_ms,
+                1,
+            )
+
+    def _build_and_link_dependency(
+        self,
+        *,
+        graph: graph.GraphView,
+        build_state: BuildState,
+        import_path: str,
+        source_path: Path,
+    ) -> BuildFileResult:
+        dependency_started_at = time.perf_counter()
+        child_result = self._build_path(
+            graph=graph,
+            import_path=import_path,
+            source_path=source_path,
+        )
+        self._link_recursive(graph, child_result.state)
+        from atopile.compiler.deferred_executor import DeferredExecutor
+
+        # Imported .ato dependencies need stage-2 execution as well so inheritance,
+        # retypes, and deferred loops are visible when the parent file links against
+        # their exported types.
+        DeferredExecutor(
+            g=graph,
+            tg=self._tg,
+            state=child_result.state,
+            visitor=child_result.visitor,
+            stdlib=self._stdlib,
+            file_imports=self,
+        ).execute()
+        self._record_compiled_file_timing(
+            build_state,
+            source_path,
+            round((time.perf_counter() - dependency_started_at) * 1000, 1),
+        )
+        self._merge_compiled_file_timings(build_state, child_result.state)
+        return child_result
 
     def _build_imported_file(
         self, graph: graph.GraphView, import_ref: ImportRef, build_state: BuildState
@@ -374,34 +494,14 @@ class Linker:
                 raw_path=import_ref.path, base_file=build_state.file_path
             )
         except ImportPathNotFoundError as e:
-            # Find the source chunk for this import in the build state
-            source_node = None
-            for (
-                type_ref_node,
-                ref,
-                source_chunk,
-                traceback,
-            ) in build_state.external_type_refs:
-                if ref == import_ref:
-                    source_node = source_chunk
-                    break
-
-            # If no specific source chunk found, use the first one that matches the path
-            if source_node is None:
-                for (
-                    type_ref_node,
-                    ref,
-                    source_chunk,
-                    traceback,
-                ) in build_state.external_type_refs:
-                    if ref and ref.path == import_ref.path:
-                        source_node = source_chunk
-                        break
-
             raise DslRichException(
                 message=str(e),
                 original=DslImportError(str(e)),
-                source_node=source_node,
+                source_node=self._find_import_source_node_for_ref(
+                    import_ref,
+                    build_state,
+                    prefer_path=True,
+                ),
             ) from e
 
         # Rest of method continues with source_path defined
@@ -410,8 +510,11 @@ class Linker:
             if import_ref.name in self._linked_modules[source_path]:
                 return self._linked_modules[source_path][import_ref.name]
             if source_path.suffix != ".py":
-                raise UndefinedSymbolError(
-                    f"Symbol `{import_ref.name}` not found in `{source_path}`"
+                raise DslRichException(
+                    f"Symbol `{import_ref.name}` not found in `{source_path}`",
+                    traceback=[],
+                    original=DslUndefinedSymbolError(),
+                    source_node=self._find_import_node_for_ref(import_ref, build_state),
                 )
 
         assert source_path.exists()
@@ -420,7 +523,12 @@ class Linker:
             try:
                 node_t = import_fabll_type(source_path, import_ref.name)
             except FabllTypeImportError as e:
-                raise UndefinedSymbolError(str(e)) from e
+                raise DslRichException(
+                    str(e),
+                    traceback=[],
+                    original=DslImportError(str(e)),
+                    source_node=self._find_import_node_for_ref(import_ref, build_state),
+                ) from e
 
             type_node = node_t.bind_typegraph(self._tg).get_or_create_type()
             if source_path not in self._linked_modules:
@@ -429,32 +537,24 @@ class Linker:
             return type_node
 
         try:
-            child_result = build_file(
-                g=graph,
-                tg=self._tg,
+            child_result = self._build_and_link_dependency(
+                graph=graph,
+                build_state=build_state,
                 import_path=import_ref.path,
-                path=source_path,
+                source_path=source_path,
             )
-            self._link_recursive(graph, child_result.state)
-            # Execute deferred operations (inheritance, retypes, for-loops) for the
-            # dependency file. This is critical for dependencies that use inheritance
-            # (e.g., `module X from Y:`), as the parent structure must be copied into
-            # derived types before their fields can be resolved.
-            from atopile.compiler.deferred_executor import DeferredExecutor
-
-            DeferredExecutor(
-                g=graph,
-                tg=self._tg,
-                state=child_result.state,
-                visitor=child_result.visitor,
-                stdlib=self._stdlib,
-                file_imports=self,  # Pass self as file import resolver
-            ).execute()
         except DslRichException as ex:
             # Add import frame showing where this import was triggered
             import_node = self._find_import_node_for_ref(import_ref, build_state)
             if import_node and build_state.file_path:
                 ex.add_import_frame(import_node, build_state.file_path)
+            raise
+        except BaseExceptionGroup as ex:
+            import_node = self._find_import_node_for_ref(import_ref, build_state)
+            if import_node and build_state.file_path:
+                for leaf in iter_leaf_exceptions(ex):
+                    if isinstance(leaf, DslRichException):
+                        leaf.add_import_frame(import_node, build_state.file_path)
             raise
         except DslException as ex:
             # Bare exception from child — wrap with import context
@@ -490,8 +590,6 @@ class Linker:
         match resolved_path:
             case None:
                 self._link(g, build_state)
-            case _ if resolved_path in self._linked_modules:
-                self._link(g, build_state, self._linked_modules[resolved_path])
             case _:
                 with self._guard_path(resolved_path):
                     self._link(g, build_state)
@@ -516,8 +614,6 @@ class Linker:
         match resolved_path:
             case None:
                 self._link(graph, build_state)
-            case _ if resolved_path in self._linked_modules:
-                self._link(graph, build_state, self._linked_modules[resolved_path])
             case _:
                 with self._guard_path(resolved_path):
                     self._link(graph, build_state)
@@ -527,174 +623,104 @@ class Linker:
         self,
         graph: graph.GraphView,
         build_state: BuildState,
-        cached_type_roots: dict[str, graph.BoundNode] | None = None,
     ) -> None:
         from atopile.compiler import DslRichException
 
-        for (
-            type_reference,
-            import_ref,
-            source_node,
-            traceback_stack,
-        ) in build_state.external_type_refs:
-            if import_ref is None:
-                # Local type reference — look up in type_roots
-                type_id = fbrk.TypeGraph.get_type_reference_identifier(
-                    type_reference=type_reference
-                )
-                target = build_state.type_roots.get(type_id)
-                if target is None:
-                    msg = f"Symbol `{type_id}` is not defined in this scope"
-                    if type_id in self._stdlib or type_id in self._stdlib_ato_files:
-                        msg += (
-                            f". Add `import {type_id}` to use"
-                            f" `{type_id}` from the standard library"
+        with accumulate(DslRichException, group_message="Linker errors") as errors:
+            explicit_refs_with_type_uses = {
+                import_ref
+                for _, import_ref, _, _ in build_state.external_type_refs
+                if import_ref is not None and import_ref.path is not None
+            }
+            for import_ref, _ in build_state.explicit_import_refs:
+                if (
+                    import_ref.path is None
+                    or import_ref in explicit_refs_with_type_uses
+                ):
+                    continue
+                with errors.collect():
+                    self._build_imported_file(graph, import_ref, build_state)
+
+            for (
+                type_reference,
+                import_ref,
+                source_node,
+                traceback_stack,
+            ) in build_state.external_type_refs:
+                with errors.collect():
+                    if import_ref is None:
+                        # Local type reference — look up in type_roots
+                        type_id = fbrk.TypeGraph.get_type_reference_identifier(
+                            type_reference=type_reference
                         )
-                    raise DslRichException(
-                        msg,
-                        original=DslUndefinedSymbolError(),
-                        source_node=source_node,
-                        traceback=traceback_stack,
-                    )
-            elif import_ref.path is None:
-                # stdlib import - first check Python types, then .ato files
-                if import_ref.name in self._stdlib:
-                    target = self._stdlib.get(import_ref.name)
-                elif import_ref.name in self._stdlib_ato_files:
-                    stdlib_path = self._stdlib_ato_files[import_ref.name]
-                    if stdlib_path in self._linked_modules:
-                        if import_ref.name in self._linked_modules[stdlib_path]:
-                            target = self._linked_modules[stdlib_path][import_ref.name]
-                        else:
-                            raise UndefinedSymbolError(
-                                f"Symbol `{import_ref.name}` not found in "
-                                f"stdlib file `{stdlib_path}`"
+                        target = build_state.type_roots.get(type_id)
+                        if target is None:
+                            msg = f"Symbol `{type_id}` is not defined in this scope"
+                            if (
+                                type_id in self._stdlib
+                                or type_id in self._stdlib_ato_files
+                            ):
+                                msg += (
+                                    f". Add `import {type_id}` to use"
+                                    f" `{type_id}` from the standard library"
+                                )
+                            raise DslRichException(
+                                msg,
+                                original=DslUndefinedSymbolError(),
+                                source_node=source_node,
+                                traceback=traceback_stack,
                             )
+                    elif import_ref.path is None:
+                        # stdlib import - first check Python types, then .ato files
+                        if import_ref.name in self._stdlib:
+                            target = self._stdlib.get(import_ref.name)
+                        elif import_ref.name in self._stdlib_ato_files:
+                            stdlib_path = self._stdlib_ato_files[import_ref.name]
+                            if stdlib_path in self._linked_modules:
+                                if import_ref.name in self._linked_modules[stdlib_path]:
+                                    target = self._linked_modules[stdlib_path][
+                                        import_ref.name
+                                    ]
+                                else:
+                                    raise DslRichException(
+                                        f"Symbol `{import_ref.name}` not found in "
+                                        f"stdlib file `{stdlib_path}`",
+                                        traceback=[],
+                                        original=DslUndefinedSymbolError(),
+                                        source_node=self._find_import_node_for_ref(
+                                            import_ref, build_state
+                                        ),
+                                    )
+                            else:
+                                child_result = self._build_and_link_dependency(
+                                    graph=graph,
+                                    build_state=build_state,
+                                    import_path=str(stdlib_path),
+                                    source_path=stdlib_path,
+                                )
+                                self._linked_modules[stdlib_path] = (
+                                    child_result.state.type_roots
+                                )
+                                target = child_result.state.type_roots[import_ref.name]
                     else:
-                        child_result = build_file(
-                            g=graph,
-                            tg=self._tg,
-                            import_path=str(stdlib_path),
-                            path=stdlib_path,
+                        # file import (includes stdlib .ato files)
+                        target = self._build_imported_file(
+                            graph, import_ref, build_state
                         )
-                        self._link_recursive(graph, child_result.state)
-                        from atopile.compiler.deferred_executor import DeferredExecutor
 
-                        DeferredExecutor(
-                            g=graph,
-                            tg=self._tg,
-                            state=child_result.state,
-                            visitor=child_result.visitor,
-                            stdlib=self._stdlib,
-                            file_imports=self,
-                        ).execute()
-                        self._linked_modules[stdlib_path] = (
-                            child_result.state.type_roots
-                        )
-                        target = child_result.state.type_roots[import_ref.name]
-            elif (
-                import_ref.path and Path(import_ref.path).stem in self._stdlib_ato_files
-            ):
-                stdlib_name = Path(import_ref.path).stem
-                stdlib_path = self._stdlib_ato_files[stdlib_name]
-                if stdlib_path in self._linked_modules:
-                    if import_ref.name in self._linked_modules[stdlib_path]:
-                        target = self._linked_modules[stdlib_path][import_ref.name]
-                    else:
-                        raise UndefinedSymbolError(
-                            f"Symbol `{import_ref.name}` not found in "
-                            f"stdlib file `{stdlib_path}`"
-                        )
-                else:
-                    child_result = build_file(
+                    fbrk.Linker.link_type_reference(
                         g=graph,
-                        tg=self._tg,
-                        import_path=str(stdlib_path),
-                        path=stdlib_path,
+                        type_reference=type_reference,
+                        target_type_node=target,
                     )
-                    self._link_recursive(graph, child_result.state)
-                    from atopile.compiler.deferred_executor import DeferredExecutor
 
-                    DeferredExecutor(
-                        g=graph,
-                        tg=self._tg,
-                        state=child_result.state,
-                        visitor=child_result.visitor,
-                        stdlib=self._stdlib,
-                        file_imports=self,
-                    ).execute()
-                    self._linked_modules[stdlib_path] = child_result.state.type_roots
-                    try:
-                        target = child_result.state.type_roots[import_ref.name]
-                    except KeyError:
-                        import_node = self._find_import_node_for_ref(
-                            import_ref, build_state
-                        )
-                        available_modules = list(child_result.state.type_roots.keys())
-                        raise DslRichException(
-                            f"Module '{import_ref.name}' not found in stdlib file '{stdlib_path}'. "  # noqa: E501
-                            f"Available modules: {available_modules}",
-                            traceback=[],
-                            source_node=import_node,
-                        )
-            elif cached_type_roots is not None:
-                # file import from cache
-                try:
-                    target = cached_type_roots[import_ref.name]
-                except KeyError:
-                    import_node = self._find_import_node_for_ref(
-                        import_ref, build_state
-                    )
-                    available_modules = list(cached_type_roots.keys())
-                    raise DslRichException(
-                        f"Module '{import_ref.name}' not found in cached file. "
-                        f"Available modules: {available_modules}",
-                        traceback=[],
-                        source_node=import_node,
-                    )
-            else:
-                # file import
-                target = self._build_imported_file(graph, import_ref, build_state)
-
-            fbrk.Linker.link_type_reference(
-                g=graph,
-                type_reference=type_reference,
-                target_type_node=target,
-            )
-
-        # Process inheritance imports - these are file imports needed for parent
-        # types in inheritance relationships. We don't create type references for
-        # these, we just ensure the files are built/linked so that DeferredExecutor
-        # can look them up when resolving inheritance.
-        for import_ref in build_state.inheritance_imports:
-            if cached_type_roots is not None:
-                # Already linked, skip
-                continue
-            if import_ref.path and Path(import_ref.path).stem in self._stdlib_ato_files:
-                stdlib_name = Path(import_ref.path).stem
-                stdlib_path = self._stdlib_ato_files[stdlib_name]
-                if stdlib_path not in self._linked_modules:
-                    child_result = build_file(
-                        g=graph,
-                        tg=self._tg,
-                        import_path=str(stdlib_path),
-                        path=stdlib_path,
-                    )
-                    self._link_recursive(graph, child_result.state)
-                    from atopile.compiler.deferred_executor import DeferredExecutor
-
-                    DeferredExecutor(
-                        g=graph,
-                        tg=self._tg,
-                        state=child_result.state,
-                        visitor=child_result.visitor,
-                        stdlib=self._stdlib,
-                        file_imports=self,
-                    ).execute()
-                    self._linked_modules[stdlib_path] = child_result.state.type_roots
-            else:
-                # Trigger the file build/link
-                self._build_imported_file(graph, import_ref, build_state)
+            # Process inheritance imports - these are file imports needed for parent
+            # types in inheritance relationships. We don't create type references for
+            # these, we just ensure the files are built/linked so that DeferredExecutor
+            # can look them up when resolving inheritance.
+            for import_ref in build_state.inheritance_imports:
+                with errors.collect():
+                    self._build_imported_file(graph, import_ref, build_state)
 
     @contextmanager
     def _guard_path(self, path: Path) -> Generator[None, None, None]:
@@ -716,11 +742,11 @@ def _build_from_ctx(
     import_path: str | None,
     root_ctx: AtoParser.File_inputContext,
     file_path: Path | None,
-    stdlib_allowlist: AllowListT | None = None,
+    extra_types: set[type[fabll.Node]] | None = None,
 ) -> BuildFileResult:
     ast_root = ANTLRVisitor(g, tg, file_path).visit(root_ctx)
     assert isinstance(ast_root, AST.File)
-    visitor = ASTVisitor(ast_root, g, tg, import_path, file_path, stdlib_allowlist)
+    visitor = ASTVisitor(ast_root, g, tg, import_path, file_path, extra_types)
     return BuildFileResult(ast_root=ast_root, state=visitor.build(), visitor=visitor)
 
 
@@ -730,7 +756,6 @@ def build_file(
     tg: fbrk.TypeGraph,
     import_path: str,
     path: Path,
-    stdlib_allowlist: AllowListT | None = None,
 ) -> BuildFileResult:
     return _build_from_ctx(
         g=g,
@@ -738,7 +763,6 @@ def build_file(
         import_path=import_path,
         root_ctx=parse_file(path),
         file_path=path,
-        stdlib_allowlist=stdlib_allowlist,
     )
 
 
@@ -748,7 +772,8 @@ def build_source(
     tg: fbrk.TypeGraph,
     source: str,
     import_path: str | None = None,
-    stdlib_allowlist: AllowListT | None = None,
+    source_path: Path | None = None,
+    extra_types: set[type[fabll.Node]] | None = None,
 ) -> BuildFileResult:
     if import_path is None:
         import uuid
@@ -759,9 +784,9 @@ def build_source(
         g=g,
         tg=tg,
         import_path=import_path,
-        root_ctx=parse_text_as_file(source),
-        file_path=None,
-        stdlib_allowlist=stdlib_allowlist,
+        root_ctx=parse_text_as_file(source, src_path=source_path or import_path),
+        file_path=source_path,
+        extra_types=extra_types,
     )
 
 

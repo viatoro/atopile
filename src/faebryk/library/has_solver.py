@@ -11,7 +11,7 @@ import faebryk.core.node as fabll
 import faebryk.library._F as F
 
 if TYPE_CHECKING:
-    from faebryk.core.solver.solver import Solver
+    from faebryk.core.solver import Solver
 
 logger = logging.getLogger(__name__)
 

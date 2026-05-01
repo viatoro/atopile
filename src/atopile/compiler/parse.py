@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
 
@@ -11,6 +12,12 @@ from atopile.errors import UserFileNotFoundError, UserSyntaxError
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
+
+
+@dataclass(frozen=True)
+class ParseRecoveryResult:
+    tree: AtoParser.File_inputContext
+    errors: list[UserSyntaxError]
 
 
 def _detect_name_starting_with_number(
@@ -99,12 +106,11 @@ def make_parser(src_stream: InputStream) -> tuple[AtoParser, ErrorListenerConver
 def _parse_input(
     input: InputStream, raise_multiple_errors: bool = False
 ) -> AtoParser.File_inputContext:
-    parser, listener = make_parser(input)
-    tree = parser.file_input()
+    result = _parse_input_recovering(input)
 
-    match listener.errors:
+    match result.errors:
         case []:
-            return tree
+            return result.tree
         case [error]:
             raise error
         case errors:
@@ -112,6 +118,12 @@ def _parse_input(
                 raise ExceptionGroup("Multiple syntax errors found", errors)
 
             raise errors[0]
+
+
+def _parse_input_recovering(input: InputStream) -> ParseRecoveryResult:
+    parser, listener = make_parser(input)
+    tree = parser.file_input()
+    return ParseRecoveryResult(tree=tree, errors=list(listener.errors))
 
 
 def parse_text_as_file(
@@ -125,6 +137,16 @@ def parse_text_as_file(
     return _parse_input(input, raise_multiple_errors=raise_multiple_errors)
 
 
+def parse_text_as_file_recovering(
+    src_code: str,
+    src_path: None | str | Path = None,
+) -> ParseRecoveryResult:
+    """Parse a string as a file input, preserving recovered syntax errors."""
+    input = InputStream(src_code)
+    input.name = str(src_path)
+    return _parse_input_recovering(input)
+
+
 def parse_file(
     src_path: str | Path, raise_multiple_errors: bool = False
 ) -> AtoParser.File_inputContext:
@@ -132,6 +154,13 @@ def parse_file(
     input = FileStream(str(src_path), encoding="utf-8")
     input.name = str(src_path)
     return _parse_input(input, raise_multiple_errors=raise_multiple_errors)
+
+
+def parse_file_recovering(src_path: str | Path) -> ParseRecoveryResult:
+    """Parse a file input, preserving recovered syntax errors."""
+    input = FileStream(str(src_path), encoding="utf-8")
+    input.name = str(src_path)
+    return _parse_input_recovering(input)
 
 
 class FileParser:

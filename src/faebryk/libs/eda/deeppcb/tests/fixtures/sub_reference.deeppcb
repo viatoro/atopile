@@ -1,0 +1,579 @@
+{
+  "name": "",
+  "metaData": {},
+  "rules": [
+    {
+      "subjects": [],
+      "type": "rotateFirst",
+      "value": false
+    },
+    {
+      "subjects": [],
+      "type": "allowViaAtSmd",
+      "value": false
+    },
+    {
+      "subjects": [],
+      "type": "pinConnectionPoint",
+      "value": "centroid"
+    }
+  ],
+  "resolution": {
+    "unit": "mm",
+    "value": 1000
+  },
+  "boundary": {
+    "shape": {
+      "type": "polyline",
+      "points": [
+        [
+          59450,
+          -32990
+        ],
+        [
+          60550,
+          -32990
+        ],
+        [
+          60550,
+          -19010
+        ],
+        [
+          59450,
+          -19010
+        ],
+        [
+          59450,
+          -32990
+        ]
+      ]
+    },
+    "clearance": 0
+  },
+  "padstacks": [
+    {
+      "id": "DefaultVia",
+      "shape": {
+        "type": "circle",
+        "center": [
+          0,
+          0
+        ],
+        "radius": 300
+      },
+      "pads": [
+        {
+          "shape": {
+            "type": "circle",
+            "center": [
+              0,
+              0
+            ],
+            "radius": 300
+          },
+          "layerFrom": 0,
+          "layerTo": 1
+        }
+      ],
+      "layers": [
+        0,
+        1
+      ],
+      "allowVia": false,
+      "hole": {
+        "shape": {
+          "type": "circle",
+          "center": [
+            0,
+            0
+          ],
+          "radius": 300
+        }
+      }
+    },
+    {
+      "id": "Padstack_Rectangle_-285_-270_285_270_L0",
+      "shape": {
+        "type": "rectangle",
+        "lowerLeft": [
+          -285,
+          -270
+        ],
+        "upperRight": [
+          285,
+          270
+        ]
+      },
+      "layers": [
+        0
+      ],
+      "allowVia": false
+    }
+  ],
+  "componentDefinitions": [
+    {
+      "id": "UNI_ROYAL_0402WGF1001TCE:R0402__430dac45-1127-48ab-a92e-706e4642524b",
+      "outline": {
+        "type": "multi",
+        "shapes": [
+          {
+            "type": "circle",
+            "center": [
+              -500,
+              -250
+            ],
+            "radius": 60
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                940,
+                500
+              ],
+              [
+                230,
+                500
+              ]
+            ]
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                -940,
+                500
+              ],
+              [
+                -230,
+                500
+              ]
+            ]
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                940,
+                -500
+              ],
+              [
+                940,
+                500
+              ]
+            ]
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                230,
+                -500
+              ],
+              [
+                940,
+                -500
+              ]
+            ]
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                -230,
+                -500
+              ],
+              [
+                -940,
+                -500
+              ]
+            ]
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                -940,
+                -500
+              ],
+              [
+                -940,
+                500
+              ]
+            ]
+          }
+        ]
+      },
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_Rectangle_-285_-270_285_270_L0",
+          "position": [
+            -430,
+            0
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_Rectangle_-285_-270_285_270_L0",
+          "position": [
+            430,
+            0
+          ],
+          "rotation": 0
+        }
+      ],
+      "keepouts": []
+    },
+    {
+      "id": "UNI_ROYAL_0402WGF1001TCE:R0402__b369199e-426e-4c47-9e56-7ee84642524b",
+      "outline": {
+        "type": "multi",
+        "shapes": [
+          {
+            "type": "circle",
+            "center": [
+              -500,
+              -250
+            ],
+            "radius": 60
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                940,
+                500
+              ],
+              [
+                230,
+                500
+              ]
+            ]
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                -940,
+                500
+              ],
+              [
+                -230,
+                500
+              ]
+            ]
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                940,
+                -500
+              ],
+              [
+                940,
+                500
+              ]
+            ]
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                230,
+                -500
+              ],
+              [
+                940,
+                -500
+              ]
+            ]
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                -230,
+                -500
+              ],
+              [
+                -940,
+                -500
+              ]
+            ]
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                -940,
+                -500
+              ],
+              [
+                -940,
+                500
+              ]
+            ]
+          }
+        ]
+      },
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_Rectangle_-285_-270_285_270_L0",
+          "position": [
+            -430,
+            0
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_Rectangle_-285_-270_285_270_L0",
+          "position": [
+            430,
+            0
+          ],
+          "rotation": 0
+        }
+      ],
+      "keepouts": []
+    },
+    {
+      "id": "UNI_ROYAL_0402WGF1001TCE:R0402__dd1488c6-1d30-4308-8862-75d54642524b",
+      "outline": {
+        "type": "multi",
+        "shapes": [
+          {
+            "type": "circle",
+            "center": [
+              -500,
+              -250
+            ],
+            "radius": 60
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                940,
+                500
+              ],
+              [
+                230,
+                500
+              ]
+            ]
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                -940,
+                500
+              ],
+              [
+                -230,
+                500
+              ]
+            ]
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                940,
+                -500
+              ],
+              [
+                940,
+                500
+              ]
+            ]
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                230,
+                -500
+              ],
+              [
+                940,
+                -500
+              ]
+            ]
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                -230,
+                -500
+              ],
+              [
+                -940,
+                -500
+              ]
+            ]
+          },
+          {
+            "type": "polyline",
+            "points": [
+              [
+                -940,
+                -500
+              ],
+              [
+                -940,
+                500
+              ]
+            ]
+          }
+        ]
+      },
+      "pins": [
+        {
+          "id": "1",
+          "padstack": "Padstack_Rectangle_-285_-270_285_270_L0",
+          "position": [
+            -430,
+            0
+          ],
+          "rotation": 0
+        },
+        {
+          "id": "2",
+          "padstack": "Padstack_Rectangle_-285_-270_285_270_L0",
+          "position": [
+            430,
+            0
+          ],
+          "rotation": 0
+        }
+      ],
+      "keepouts": []
+    }
+  ],
+  "viaDefinitions": [
+    "DefaultVia"
+  ],
+  "netClasses": [
+    {
+      "id": "__default__",
+      "trackWidth": 200,
+      "clearance": 200,
+      "viaDefinition": "DefaultVia",
+      "nets": []
+    }
+  ],
+  "netPreferences": [],
+  "nets": [
+    {
+      "id": "unnamed[1]",
+      "pins": [
+        "R3-2"
+      ]
+    },
+    {
+      "id": "unnamed[0]-2",
+      "pins": [
+        "R3-1",
+        "R2-2"
+      ]
+    },
+    {
+      "id": "unnamed[0]-1",
+      "pins": [
+        "R2-1",
+        "R1-2"
+      ]
+    },
+    {
+      "id": "unnamed[0]",
+      "pins": [
+        "R1-1"
+      ]
+    }
+  ],
+  "differentialPairs": [],
+  "layers": [
+    {
+      "id": "F.Cu",
+      "type": "signal",
+      "keepouts": []
+    },
+    {
+      "id": "B.Cu",
+      "type": "signal",
+      "keepouts": []
+    }
+  ],
+  "components": [
+    {
+      "id": "R3",
+      "definition": "UNI_ROYAL_0402WGF1001TCE:R0402__430dac45-1127-48ab-a92e-706e4642524b",
+      "position": [
+        60000,
+        -20000
+      ],
+      "rotation": 90,
+      "side": "FRONT",
+      "partNumber": "UNI_ROYAL_0402WGF1001TCE:R0402",
+      "protected": true
+    },
+    {
+      "id": "R2",
+      "definition": "UNI_ROYAL_0402WGF1001TCE:R0402__b369199e-426e-4c47-9e56-7ee84642524b",
+      "position": [
+        60000,
+        -26000
+      ],
+      "rotation": 90,
+      "side": "FRONT",
+      "partNumber": "UNI_ROYAL_0402WGF1001TCE:R0402",
+      "protected": true
+    },
+    {
+      "id": "R1",
+      "definition": "UNI_ROYAL_0402WGF1001TCE:R0402__dd1488c6-1d30-4308-8862-75d54642524b",
+      "position": [
+        60000,
+        -32000
+      ],
+      "rotation": 90,
+      "side": "FRONT",
+      "partNumber": "UNI_ROYAL_0402WGF1001TCE:R0402",
+      "protected": true
+    }
+  ],
+  "wires": [],
+  "vias": [],
+  "planes": [],
+  "ratsnest": [
+    {
+      "end": [
+        60000.0,
+        -25570.0
+      ],
+      "netId": "unnamed[0]-2",
+      "start": [
+        60000.0,
+        -20430.0
+      ]
+    },
+    {
+      "end": [
+        60000.0,
+        -31570.0
+      ],
+      "netId": "unnamed[0]-1",
+      "start": [
+        60000.0,
+        -26430.0
+      ]
+    }
+  ]
+}

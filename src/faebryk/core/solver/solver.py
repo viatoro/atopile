@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from itertools import count
 from typing import TYPE_CHECKING
 
+import pytest
+
 import faebryk.core.faebrykpy as fbrk
 import faebryk.core.graph as graph
 import faebryk.core.node as fabll
@@ -18,7 +20,7 @@ from faebryk.core.solver.algorithm import SolverAlgorithm
 
 if TYPE_CHECKING:
     import faebryk.library._F as F
-from atopile.logging import scope
+from atopile.logging import get_logger, scope
 from atopile.logging_utils import NET_LINE_WIDTH
 from faebryk.core.solver.mutator import MutationMap, Mutator
 from faebryk.core.solver.symbolic import (
@@ -27,6 +29,7 @@ from faebryk.core.solver.symbolic import (
     structural,
 )
 from faebryk.core.solver.utils import (
+    FULL_SOLVER,
     MAX_ITERATIONS_HEURISTIC,
     PRINT_START,
     S_LOG,
@@ -34,7 +37,7 @@ from faebryk.core.solver.utils import (
 from faebryk.libs.test.times import Times
 from faebryk.libs.util import not_none
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 if S_LOG:
     logger.setLevel(logging.DEBUG)
@@ -85,6 +88,7 @@ class Solver:
             return Solver.SolverState(data=self.data.compressed())
 
     def __init__(self) -> None:
+        assert bool(FULL_SOLVER)
         self.state: Solver.SolverState | None = None
         self._terminal = False
 
@@ -337,17 +341,17 @@ class Solver:
 
     def simplify_for(
         self,
-        *ops: F.Parameters.can_be_operand,
+        *params: F.Parameters.is_parameter,
         terminal: bool = False,
     ):
+        ops = [p.as_operand.get() for p in params]
         g = ops[0].g
         tg = ops[0].tg
-        relevant = list(ops)
         return self.simplify(
             g=g,
             tg=tg,
             terminal=terminal,
-            relevant=relevant,
+            relevant=ops,
         )
 
     def simplify_and_extract_superset(
@@ -385,6 +389,8 @@ class Solver:
 
 
 def test_solver_super_basic():
+    from faebryk.core.solver import Solver as SolverAlias
+
     g = graph.GraphView.create()
     tg = fbrk.TypeGraph.create(g=g)
 
@@ -403,14 +409,16 @@ def test_solver_super_basic():
 
     P = FT.Parameters.BooleanParameter.bind_typegraph(tg=tg).create_instance(g=g)
     P.set_singleton(True)
-    solver = Solver()
-    res = solver.simplify(tg, g, terminal=True)
-    lit = res.data.mutation_map.try_extract_superset(P.is_parameter_operatable.get())
+    solver = SolverAlias()
+    P_param = P.is_parameter_operatable.get().as_parameter.force_get()
+    solver.simplify_for(P_param)
+    lit = solver.extract_superset(P_param)
     assert lit
     print(lit.pretty_str())
     assert lit.op_setic_equals_singleton(True)
 
 
+@pytest.mark.full_solver_only
 def test_solver_basic():
     g = graph.GraphView.create()
     tg = fbrk.TypeGraph.create(g=g)

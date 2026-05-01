@@ -34,7 +34,7 @@ def _wait_for_server(base_url: str, timeout_s: float = 60.0) -> None:
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         try:
-            with urlopen(f"{base_url}/api/render-model", timeout=1.5) as resp:
+            with urlopen(base_url, timeout=1.5) as resp:
                 if resp.status == 200:
                     return
         except URLError:
@@ -83,7 +83,8 @@ def test_frontend_drag_closed_loop_esp32():
         pytest.skip(f"ESP32 fixture PCB not found: {ESP32_PCB}")
     if not (FRONTEND_DIR / "node_modules/puppeteer").exists():
         pytest.skip(
-            "puppeteer is not installed (run npm install in layout_server/frontend)"
+            "puppeteer is not installed "
+            "(run bun install in src/atopile/layout_server/frontend)"
         )
     if not PUPPETEER_SCRIPT.is_file():
         pytest.skip(f"Puppeteer script missing: {PUPPETEER_SCRIPT}")

@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": [
+    "agent",
+    "api",
+    "panel-3d",
+    "panel-developer",
+    "panel-layout",
+    "panel-pinout",
+    "panel-logs",
+    "panel-logs-standalone",
+    "panel-manufacture",
+    "panel-pcb-diff",
+    "panel-ibom",
+    "panel-settings",
+    "panel-tree",
+    "common",
+    "sidebar",
+    "sidebar-details",
+    "sidebar-panels",
+    "types",
+    "../protocol"
+  ]
+}

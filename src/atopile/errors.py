@@ -11,7 +11,6 @@ This module provides:
 from __future__ import annotations
 
 import contextlib
-import io
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
@@ -28,6 +27,7 @@ from typing import (
     Self,
     Sequence,
     Type,
+    TypedDict,
     cast,
 )
 
@@ -44,6 +44,8 @@ from faebryk.libs.util import groupby, md_list
 
 if TYPE_CHECKING:
     import faebryk.core.node as fabll
+    import faebryk.library._F as F
+    from atopile.compiler import ast_types as AST
 
 
 # NOTE: Using standard logging here to avoid circular import.
@@ -75,6 +77,7 @@ class UserException(Exception):
         self.message = message
         self._title = title
         self.markdown = markdown
+        self.source_chunk: AST.SourceChunk | None = None
 
     @property
     def title(self):
@@ -88,6 +91,17 @@ class UserException(Exception):
     def get_frozen(self) -> tuple:
         """Return a frozen version of this error for deduplication."""
         return (self.__class__, self.message, self._title)
+
+    def serialize_traceback(self) -> SerializedTraceback:
+        """Serialize this exception as a structured ato traceback.
+
+        Returns a dict with title, message, frames[], and origin.
+        Subclasses override to provide richer source location data.
+        """
+        origin = (
+            serialize_source_chunk(self.source_chunk) if self.source_chunk else None
+        )
+        return _make_traceback_dict(self, frames=[], origin=origin)
 
     def __rich_console__(
         self, console: Console, options: ConsoleOptions
@@ -274,6 +288,23 @@ class SourceLocatedUserException(UserException):
 
         return renderables
 
+    def serialize_traceback(self) -> SerializedTraceback:
+        frames = [
+            _serialize_token_frame(self.token_stream, ctx.start, ctx.stop)
+            for ctx in self.traceback or []
+            if ctx is not None and self.token_stream is not None
+        ]
+        origin = (
+            _serialize_token_frame(
+                self.token_stream,
+                self.origin_start,
+                self.origin_stop or self.origin_start,
+            )
+            if self.origin_start and self.token_stream
+            else None
+        )
+        return _make_traceback_dict(self, frames=frames, origin=origin)
+
 
 # Alias for backwards compatibility
 _BaseUserException = SourceLocatedUserException
@@ -357,6 +388,37 @@ class UserUnknownUnitError(SourceLocatedUserException):
 
 class UserIncompatibleUnitError(SourceLocatedUserException):
     """Raised if units are incompatible."""
+
+    @classmethod
+    def from_constraints(
+        cls,
+        message: str,
+        *,
+        parameters: Sequence["F.Parameters.is_parameter"] = (),
+        constraints: Sequence["F.Expressions.is_expression"] = (),
+    ) -> Self:
+        sections = [message]
+
+        if parameters:
+            unique_params = set(parameters)
+            label = "Parameter:" if len(unique_params) == 1 else "Parameters:"
+            sections.append(
+                f"{label}\n"
+                f"{md_list(f'`{node.pretty_repr()}`' for node in unique_params)}"
+            )
+
+        if constraints:
+
+            def fmt(expr):
+                return expr.compact_repr(
+                    use_full_name=True, no_lit_suffix=True, no_class_suffix=True
+                )
+
+            formatted = md_list(f"`{fmt(expr)}`" for expr in set(constraints))
+
+            sections.append(f"Constraints involved:\n{formatted}")
+
+        return cls("\n\n".join(sections))
 
 
 class UserInfraError(SourceLocatedUserException):
@@ -558,7 +620,9 @@ class Pacman[T: Exception](contextlib.suppress, ABC):
         if issubclass(exctype, BaseExceptionGroup):
             excinst = cast(BaseExceptionGroup, excinst)
             match, rest = excinst.split(self._exceptions)  # type: ignore
-            if self.nom_nom_nom(match, (exctype, match, exctb)):  # type: ignore
+            if match is not None and self.nom_nom_nom(  # type: ignore[arg-type]
+                match, (exctype, match, exctb)
+            ):
                 return False
             if rest is None:
                 return True
@@ -647,7 +711,17 @@ class accumulate:
     def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, exctype, excinst, exctb):
+        if exctype is not None:
+            if (
+                excinst is not None
+                and (accumulated := self.get_exception()) is not None
+            ):
+                try:
+                    excinst.add_note(f"Additional accumulated errors: {accumulated}")
+                except Exception:
+                    pass
+            return False
         self.raise_errors()
 
 
@@ -655,9 +729,10 @@ _collectors: list[DowngradedExceptionCollector] = []
 
 
 class DowngradedExceptionCollector[T: Exception]:
-    def __init__(self, exc_type: Type[T]):
+    def __init__(self, exc_type: Type[T], *, suppress_logging: bool = False):
         self.exceptions: list[tuple[T, int]] = []
         self.exc_type = exc_type
+        self.suppress_logging = suppress_logging
 
     def add(self, exception: Exception, severity: int = logging.WARNING):
         if isinstance(exception, self.exc_type):
@@ -704,10 +779,16 @@ class downgrade[T: Exception](Pacman):
             exceptions = [exc]
 
         for e in exceptions:
+            suppress_log = False
             for collector in _collectors:
                 collector.add(e, self.to_level)
+                if collector.suppress_logging and isinstance(e, collector.exc_type):
+                    suppress_log = True
 
-            self.logger.log(self.to_level, str(e), exc_info=e, extra={"markdown": True})
+            if not suppress_log:
+                self.logger.log(
+                    self.to_level, str(e), exc_info=e, extra={"markdown": True}
+                )
 
         return self.raise_anyway
 
@@ -947,10 +1028,21 @@ def extract_traceback_frames(
 
         code_line = linecache.getline(filename, tb.tb_lineno).strip()
 
+        # Extract column offset (Python 3.11+ via co_positions)
+        colno = None
+        try:
+            positions = list(frame.f_code.co_positions())
+            idx = tb.tb_lasti // 2
+            if 0 <= idx < len(positions):
+                colno = positions[idx][2]  # col_offset
+        except AttributeError, TypeError:
+            pass
+
         frames.append(
             {
                 "filename": filename,
                 "lineno": tb.tb_lineno,
+                "colno": colno,
                 "function": frame.f_code.co_name,
                 "code_line": code_line,
                 "locals": locals_dict,
@@ -974,22 +1066,104 @@ def get_exception_display_message(exc: BaseException) -> str:
     return str(exc) or type(exc).__name__
 
 
-def render_ato_traceback(exc: BaseException) -> str | None:
-    """Render exception's rich output to an ANSI-formatted string.
+class SourceFrame(TypedDict):
+    """A source-located frame in a serialized traceback."""
 
-    Uses force_terminal=True to include ANSI escape codes (colors) in the
-    output, which can be rendered by the frontend.
-    """
-    if not hasattr(exc, "__rich_console__"):
+    file: str
+    line: int
+    column: int
+    code: str
+    start_line: int
+    highlight_lines: list[int]
+
+
+class SerializedTraceback(TypedDict):
+    """Serialized ato traceback envelope sent to the frontend."""
+
+    title: str
+    message: str | None
+    frames: list[SourceFrame]
+    origin: SourceFrame | None
+
+
+def _make_traceback_dict(
+    exc: UserException, *, frames: list[SourceFrame], origin: SourceFrame | None
+) -> SerializedTraceback:
+    """Build the standard serialized traceback envelope."""
+    return {
+        "title": exc.title,
+        "message": exc.message,
+        "frames": frames,
+        "origin": origin,
+    }
+
+
+def _make_source_frame(
+    *,
+    file: str,
+    line: int,
+    column: int,
+    code: str,
+    start_line: int,
+    highlight_lines: list[int],
+) -> SourceFrame:
+    """Build a source frame dict — the common shape used by all serializers."""
+    return {
+        "file": file,
+        "line": line,
+        "column": column,
+        "code": code,
+        "start_line": start_line,
+        "highlight_lines": highlight_lines,
+    }
+
+
+def serialize_source_chunk(source_chunk: "AST.SourceChunk") -> SourceFrame | None:
+    """Serialize an AST SourceChunk into a structured source frame."""
+    try:
+        loc = source_chunk.loc.get()
+        file_path = source_chunk.get_path()
+        if not file_path:
+            return None
+
+        start_line = loc.get_start_line()
+        end_line = loc.get_end_line()
+        file_path = str(Path(file_path).resolve())
+        code = source_chunk.get_text()
+
+        return _make_source_frame(
+            file=file_path,
+            line=start_line,
+            column=loc.get_start_col(),
+            code=code,
+            start_line=start_line,
+            highlight_lines=list(range(start_line, end_line + 1)),
+        )
+    except Exception:
         return None
-    ansi_buffer = io.StringIO()
-    capture_console = Console(
-        file=ansi_buffer,
-        width=120,
-        force_terminal=True,
+
+
+def _serialize_token_frame(
+    token_stream: "CommonTokenStream",
+    start_token: "Token",
+    stop_token: "Token",
+) -> SourceFrame:
+    """Extract structured source frame from token range."""
+    from atopile.compiler.parse_utils import (
+        PygmentsLexerReconstructor,
+        get_src_info_from_token,
     )
-    renderables = exc.__rich_console__(capture_console, capture_console.options)
-    for renderable in list(renderables)[1:]:
-        capture_console.print(renderable)
-    result = ansi_buffer.getvalue().strip()
-    return result or None
+
+    lexer = PygmentsLexerReconstructor.from_tokens(
+        token_stream, start_token, stop_token, 1, 1
+    )
+    src_path, src_line, src_col = get_src_info_from_token(start_token)
+
+    return _make_source_frame(
+        file=str(Path(src_path).resolve()),
+        line=src_line,
+        column=src_col,
+        code=lexer.get_code(),
+        start_line=lexer.start_line,
+        highlight_lines=list(range(start_token.line, stop_token.line + 1)),
+    )

@@ -3,7 +3,26 @@ const py = @import("pybindings.zig");
 
 // Global registry for type objects to avoid creating duplicates
 var type_registry = std.HashMap([]const u8, *py.PyTypeObject, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(std.heap.c_allocator);
-var registry_mutex = std.Thread.Mutex{};
+
+// Minimal spinlock. `std.Thread.Mutex` is gone in 0.16 and `std.Io.Mutex`
+// requires an Io instance, which isn't available here (called from CPython
+// callbacks during module init). The registry is only written during one-time
+// type init, so contention is effectively zero.
+const SpinLock = struct {
+    flag: std.atomic.Value(bool) = .init(false),
+
+    pub fn lock(self: *SpinLock) void {
+        while (self.flag.cmpxchgWeak(false, true, .acquire, .monotonic) != null) {
+            std.Thread.yield() catch {};
+        }
+    }
+
+    pub fn unlock(self: *SpinLock) void {
+        self.flag.store(false, .release);
+    }
+};
+
+var registry_mutex: SpinLock = .{};
 
 // Global cache to reuse list wrappers per underlying ArrayList pointer
 // No global list wrapper cache

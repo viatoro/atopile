@@ -1,7 +1,6 @@
 import textwrap
 
 import faebryk.core.node as fabll
-from atopile.compiler.ast_visitor import STDLIB_ALLOWLIST
 from atopile.compiler.build import (
     BuildFileResult,
     Linker,
@@ -48,17 +47,17 @@ def build_instance(
 ) -> tuple[GraphView, TypeGraph, StdlibRegistry, BuildFileResult, BoundNode]:
     import faebryk.library._F as F
 
+    extra = set(stdlib_extra) if stdlib_extra else None
     g = GraphView.create()
     tg = TypeGraph.create(g=g)
-    stdlib_allowlist = STDLIB_ALLOWLIST.copy() | set(stdlib_extra)
-    stdlib = StdlibRegistry(tg, allowlist=stdlib_allowlist)
+    stdlib = StdlibRegistry(tg, extra_types=extra)
 
     result = build_source(
         g=g,
         tg=tg,
         source=textwrap.dedent(source),
         import_path=import_path,
-        stdlib_allowlist=stdlib_allowlist,
+        extra_types=extra,
     )
 
     _link(g, stdlib, tg, result)

@@ -31,10 +31,14 @@ def _get_non_excluded_project_files(cfg: atopile.config.ProjectConfig) -> list[P
     Returns:
         A list of Path objects for all non-excluded files
     """
-    from git import Repo
+    from git import InvalidGitRepositoryError, NoSuchPathError, Repo
 
     prjroot = cfg.paths.root
-    repo = Repo(prjroot, search_parent_directories=True)
+    try:
+        repo = Repo(prjroot, search_parent_directories=True)
+        ignore_root = Path(repo.working_tree_dir or prjroot)
+    except InvalidGitRepositoryError, NoSuchPathError:
+        ignore_root = prjroot
 
     # For gitignore patterns, we need to get all files and filter out the matched ones,
     # since gitignore patterns specify which files to exclude
@@ -42,8 +46,8 @@ def _get_non_excluded_project_files(cfg: atopile.config.ProjectConfig) -> list[P
     for ignore_file in itertools.chain(
         # TODO: only search directories between cwd and root
         # TODO include other gitignore sources
-        Path(repo.working_tree_dir or prjroot).glob("*.gitignore"),
-        Path(repo.working_tree_dir or prjroot).glob("*.atoignore"),
+        ignore_root.glob("*.gitignore"),
+        ignore_root.glob("*.atoignore"),
     ):
         if not ignore_file.is_file():
             continue

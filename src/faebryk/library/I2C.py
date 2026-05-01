@@ -29,16 +29,16 @@ class I2C(fabll.Node):
         # unit=F.Units.Bit,
         domain=F.NumberDomain.Args(negative=False, integer=True),
     )
-    bus_addresses = F.Parameters.NumericParameter.MakeChild(
-        # unit=F.Units.Bit,
-        domain=F.NumberDomain.Args(negative=False, integer=True),
-    )
     frequency = F.Parameters.NumericParameter.MakeChild(unit=F.Units.Hertz)
 
     # ----------------------------------------
     #                 traits
     # ----------------------------------------
     _is_interface = fabll.Traits.MakeEdge(fabll.is_interface.MakeChild())
+
+    is_data_interface = fabll.Traits.MakeEdge(
+        F.DataInterface.is_data_interface.MakeChild()
+    )
 
     _single_electric_reference = fabll.Traits.MakeEdge(
         F.has_single_electric_reference.MakeChild()

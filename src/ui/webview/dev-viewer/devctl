@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Standalone sidebar dev server.
+#
+# Runs the core server + Vite dev server side by side.
+# Vite proxies the WebSocket to the core server, so no extra tools needed
+# for remote access (Tailscale / LAN).
+#
+# Usage:
+#     ./devctl up        Start core server + Vite dev server
+#     ./devctl status    Show running dev server info
+#
+#
+# Requirements:
+#   - uv (for local ato source)
+#   - bun (for Vite via bunx)
+
+set -euo pipefail
+
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+RESET='\033[0m'
+
+DEV_VIEWER_DIR="$(cd "$(dirname "$0")" && pwd)"
+WEBVIEW_DIR="$(dirname "$DEV_VIEWER_DIR")"
+APP_DIR="$(cd "$WEBVIEW_DIR/../../../.." && pwd)"
+
+CORE_PORT=18730
+
+info() { echo -e "${GREEN}[dev-viewer]${RESET} $1"; }
+error() { echo -e "${RED}[dev-viewer]${RESET} $1" >&2; }
+
+preflight() {
+  local missing=()
+  command -v uv  &>/dev/null || missing+=(uv)
+  command -v bun &>/dev/null || missing+=(bun)
+  if [ ${#missing[@]} -gt 0 ]; then
+    error "Missing required tools: ${missing[*]}"
+    exit 1
+  fi
+}
+
+cmd_up() {
+  cleanup() {
+    kill $CORE_PID 2>/dev/null || true
+    wait 2>/dev/null || true
+  }
+  trap cleanup EXIT
+
+  info "Starting core server on port $CORE_PORT..."
+  cd "$APP_DIR"
+
+  # Pipe core server output through a fifo so we can wait for the READY signal
+  # while still showing its output. This avoids the race where --force kills
+  # an old server and Vite connects to it mid-shutdown.
+  READY_FIFO=$(mktemp -u)
+  mkfifo "$READY_FIFO"
+
+  (
+    ATOPILE_CORE_SERVER_PORT=$CORE_PORT uv run ato serve core --force 2>&1 |
+    while IFS= read -r line; do
+      echo "$line"
+      if [[ "$line" == *ATOPILE_SERVER_READY* ]]; then
+        echo "ready" > "$READY_FIFO"
+      fi
+    done
+  ) &
+  CORE_PID=$!
+
+  info "Waiting for core server..."
+  # Block until the READY signal or timeout after 30s
+  if read -t 30 < "$READY_FIFO"; then
+    info "Core server ready"
+  else
+    error "Core server did not start within 30s"
+  fi
+  rm -f "$READY_FIFO"
+
+  cd "$DEV_VIEWER_DIR"
+  echo ""
+
+  # VITE_PROJECT_PATH is exposed to the browser as import.meta.env.VITE_PROJECT_PATH
+  export VITE_PROJECT_PATH="$APP_DIR"
+  exec bunx vite
+}
+
+cmd_status() {
+  echo "=== Dev Viewer ==="
+  info "Core server port: $CORE_PORT"
+  info "Vite dev server:  http://localhost:5199"
+  if command -v tailscale &>/dev/null; then
+    TS_IP=$(tailscale ip -4 2>/dev/null || true)
+    if [ -n "$TS_IP" ]; then
+      info "Tailscale:        http://$TS_IP:5199"
+    fi
+  fi
+}
+
+USAGE="Usage: ./devctl <command>
+
+Commands:
+  up       Start core server + Vite dev server
+  status   Show dev server connection info"
+
+case "${1:-}" in
+  up)      preflight; cmd_up ;;
+  status)  cmd_status ;;
+  -h|--help|"") echo "$USAGE" ;;
+  *)       error "Unknown command: $1"; echo "$USAGE"; exit 1 ;;
+esac

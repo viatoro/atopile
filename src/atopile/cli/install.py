@@ -13,7 +13,7 @@ import typer
 
 from atopile import errors
 from atopile.logging import get_logger
-from atopile.telemetry import capture
+from atopile.telemetry.telemetry import capture
 
 logger = get_logger(__name__)
 
@@ -224,9 +224,9 @@ def list_():
             md_list(
                 deps.dag.to_tree(extra_roots=deps.direct_deps),
                 recursive=True,
-                mapper=lambda x: x.spec.identifier
-                if isinstance(x, ProjectDependency)
-                else x,
+                mapper=lambda x: (
+                    x.spec.identifier if isinstance(x, ProjectDependency) else x
+                ),
             )
         )
     )

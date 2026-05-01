@@ -217,18 +217,16 @@ def discover_configflags(*roots: Path) -> list[ConfigFlagDef]:
 
 def get_default_roots() -> list[Path]:
     """Get the default root directories for ConfigFlag discovery."""
-    cwd = Path.cwd()
+    from faebryk.libs.util import app_root
+
+    root = app_root()
     roots = []
 
-    # Look for src directories relative to cwd
-    for candidate in [cwd, cwd.parent, cwd.parent.parent]:
-        atopile_src = candidate / "src" / "atopile"
-        faebryk_src = candidate / "src" / "faebryk"
-        if atopile_src.is_dir() or faebryk_src.is_dir():
-            if atopile_src.is_dir():
-                roots.append(atopile_src)
-            if faebryk_src.is_dir():
-                roots.append(faebryk_src)
-            break
+    atopile_src = root / "src" / "atopile"
+    faebryk_src = root / "src" / "faebryk"
+    if atopile_src.is_dir():
+        roots.append(atopile_src)
+    if faebryk_src.is_dir():
+        roots.append(faebryk_src)
 
     return roots

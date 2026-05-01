@@ -1,7 +1,7 @@
 import typer
 
 from atopile.logging import get_logger
-from atopile.telemetry import capture
+from atopile.telemetry.telemetry import capture
 
 logger = get_logger(__name__)
 

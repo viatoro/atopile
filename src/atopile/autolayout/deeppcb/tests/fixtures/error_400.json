@@ -1,0 +1,6 @@
+{
+  "statusCode": 400,
+  "status": "BadRequest",
+  "errorCode": "INVALID_BOARD",
+  "errorMessage": "Board file is missing required field: boundary"
+}

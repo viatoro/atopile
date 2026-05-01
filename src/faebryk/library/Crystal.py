@@ -69,7 +69,12 @@ class Crystal(fabll.Node):
     S = F.has_simple_value_representation.Spec
     _simple_repr = fabll.Traits.MakeEdge(
         F.has_simple_value_representation.MakeChild(
-            S(frequency, tolerance=True),
+            S(
+                frequency,
+                format_mode=(
+                    F.has_simple_value_representation.FormatMode.VALUE_WITH_TOLERANCE
+                ),
+            ),
         )
     )
 

@@ -9,8 +9,8 @@ import git
 import pathvalidate
 import pytest
 
+from faebryk.libs.util import app_root as _app_root
 from faebryk.libs.util import not_none, robustly_rm_dir, run_live
-from faebryk.libs.util import repo_root as _repo_root
 
 
 class CloneError(Exception):
@@ -34,7 +34,7 @@ SKIP_PACKAGE_DIRS = {"archive", "logos", ".git", "__pycache__"}
 def build_project(prj_path: Path, request: pytest.FixtureRequest):
     """Generically "build" the project."""
     friendly_node_name = pathvalidate.sanitize_filename(str(request.node.name))
-    artifact_dir = _repo_root() / "artifacts"
+    artifact_dir = _app_root() / "artifacts"
 
     try:
         ato_build_args = [
@@ -157,9 +157,12 @@ def packages_repo_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
     otherwise clones fresh to a temp directory.
     """
     # Option 1: Use local packages repo if available (for local dev)
-    local_packages = _repo_root().parent / "packages"
-    if local_packages.exists() and (local_packages / ".git").exists():
-        return local_packages
+    for local_packages in (
+        _app_root().parent / "packages",
+        _app_root().parents[1] / "packages",
+    ):
+        if local_packages.exists() and (local_packages / ".git").exists():
+            return local_packages
 
     # Option 2: Clone fresh to temp directory
     tmp_dir = tmp_path_factory.mktemp("packages-repo")
@@ -224,7 +227,7 @@ def test_single_projects(
     try:
         sync_project(prj_path)
         build_project(prj_path, request=request)
-    except (InstallError, BuildError):
+    except InstallError, BuildError:
         if skip_reason:
             pytest.skip(f"xfail: {skip_reason}")
         else:
@@ -252,7 +255,9 @@ def pytest_generate_tests(metafunc: pytest.Metafunc):
     # This requires the repo to exist - use indirect parameterization
     # The actual package list will be validated at test time
     multipackage_subdir = not_none(PACKAGES_REPO.multipackage)
-    packages_path = _repo_root().parent / "packages" / multipackage_subdir
+    packages_path = _app_root().parent / "packages" / multipackage_subdir
+    if not packages_path.exists():
+        packages_path = _app_root().parents[1] / "packages" / multipackage_subdir
 
     if packages_path.exists():
         packages = _discover_packages(packages_path)
@@ -312,7 +317,7 @@ def test_package(
     try:
         sync_project(test_package_path)
         build_project(test_package_path, request=request)
-    except (InstallError, BuildError):
+    except InstallError, BuildError:
         if skip_reason:
             pytest.skip(f"xfail: {skip_reason}")
         else:

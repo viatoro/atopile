@@ -290,12 +290,11 @@ pub const SExp = struct {
     }
 
     pub fn pretty(self: SExp, allocator: std.mem.Allocator) ![]const u8 {
-        var in = std.array_list.Managed(u8).init(allocator);
-        defer in.deinit();
-        try in.ensureTotalCapacity(self.estimatedSerializedLen());
+        var aw = try std.Io.Writer.Allocating.initCapacity(allocator, self.estimatedSerializedLen());
+        defer aw.deinit();
 
-        try self.str(in.writer());
-        const out = try prettify_sexp_string(allocator, in.items);
+        try self.str(&aw.writer);
+        const out = try prettify_sexp_string(allocator, aw.writer.buffered());
         return out;
     }
 

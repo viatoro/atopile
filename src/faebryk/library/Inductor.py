@@ -35,6 +35,7 @@ class Inductor(fabll.Node):
                 "saturation_current": saturation_current,
                 "self_resonant_frequency": self_resonant_frequency,
             },
+            package_prefix="L",
         )
     )
 
@@ -60,7 +61,13 @@ class Inductor(fabll.Node):
     S = F.has_simple_value_representation.Spec
     _simple_repr = fabll.Traits.MakeEdge(
         F.has_simple_value_representation.MakeChild(
-            S(inductance, tolerance=True, prefix="L"),
+            S(
+                inductance,
+                format_mode=(
+                    F.has_simple_value_representation.FormatMode.VALUE_WITH_TOLERANCE
+                ),
+                prefix="L",
+            ),
             S(self_resonant_frequency, prefix="SRF"),
             S(max_current, prefix="Imax"),
             S(dc_resistance, prefix="DCR"),

@@ -1,6 +1,7 @@
 const std = @import("std");
 const pyzig = @import("pyzig");
 const sexp = @import("sexp");
+const cast = pyzig.cast;
 
 const py = pyzig.pybindings;
 const bind = pyzig.pyzig;
@@ -355,7 +356,7 @@ fn generateModule(
             }
 
             // Set the data
-            const wrapper = @as(*bind.PyObjectWrapper(FileType), @ptrCast(@alignCast(pyobj)));
+            const wrapper = cast.ctx(bind.PyObjectWrapper(FileType), pyobj);
             wrapper.ob_base = py.PyObject_HEAD{ .ob_refcnt = 1, .ob_type = type_obj };
             wrapper.owned = false;
 
@@ -383,7 +384,7 @@ fn generateModule(
             }
 
             // Get the File from the argument
-            const wrapper = @as(*bind.PyObjectWrapper(FileType), @ptrCast(@alignCast(args)));
+            const wrapper = cast.ctx(bind.PyObjectWrapper(FileType), args);
 
             // Serialize to string
             var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);

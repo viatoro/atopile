@@ -94,6 +94,7 @@ def test_parser_pcb_and_footprints():
         "lcsc:LED0603-RD-YELLOW",
         "lcsc:R0402",
         "lcsc:BAT-TH_BS-02-A1AJ010",
+        "TestLib:TPSM863257_like",
     ]
 
     assert not pcb.kicad_pcb.setup.pcbplotparams.usegerberextensions
@@ -334,6 +335,44 @@ def test_list_none():
     assert fp.footprint.tags == []
     dumped = kicad.dumps(fp)
     assert "tags" not in dumped
+
+
+def test_nested_footprint_wrapper_keeps_parent_alive():
+    footprint = kicad.footprint.loads(FPFILE.read_text()).footprint
+
+    assert footprint.name == "LED_0201_0603Metric"
+    assert footprint.tags == ["LED"]
+    assert footprint.pads[0].shape == "roundrect"
+    assert footprint.pads[0].at.x == -0.345
+
+
+def test_pcb_footprint_metadata_surface_matches_library_schema():
+    sexp = """
+    (kicad_pcb
+        (generator "test_atopile")
+        (generator_version "latest")
+        (layers
+            (0 "F.Cu" signal)
+            (1 "B.Cu" signal)
+        )
+        (footprint "test"
+            (layer "F.Cu")
+            (at 0 0 0)
+            (descr "fixture")
+            (tags "fixture" "demo")
+        )
+    )
+    """
+
+    pcb = kicad.loads(kicad.pcb.PcbFile, sexp)
+    footprint = pcb.kicad_pcb.footprints[0]
+
+    assert footprint.description == "fixture"
+    assert footprint.tags == ["fixture", "demo"]
+
+    dumped = kicad.dumps(pcb)
+    assert '(descr "fixture")' in dumped
+    assert '(tags "fixture" "demo")' in dumped
 
 
 def test_list_struct_positional():

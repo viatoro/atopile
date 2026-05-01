@@ -63,10 +63,10 @@ class USB_C(fabll.Node):
             usb_c = new USB_C
 
             # Configure differential pair impedances
-            usb_c.rx.impedance = 90ohm +/- 10%
-            usb_c.tx.impedance = 90ohm +/- 10%
-            usb_c.usb3.usb2.dp.impedance = 90ohm +/- 10%
-            usb_c.usb3.usb2.dm.impedance = 90ohm +/- 10%
+            usb_c.rx.differential_impedance = 90ohm +/- 10%
+            usb_c.tx.differential_impedance = 90ohm +/- 10%
+            usb_c.usb3.usb2.dp.differential_impedance = 90ohm +/- 10%
+            usb_c.usb3.usb2.dm.differential_impedance = 90ohm +/- 10%
 
             # Connect power reference for logic levels
             power_3v3 = new ElectricPower

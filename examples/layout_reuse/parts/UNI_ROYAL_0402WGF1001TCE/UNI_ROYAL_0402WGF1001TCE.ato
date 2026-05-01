@@ -1,4 +1,3 @@
-#pragma experiment("TRAITS")
 import has_datasheet
 import has_designator_prefix
 import has_part_picked
@@ -10,7 +9,7 @@ component UNI_ROYAL_0402WGF1001TCE_package:
 
     # This trait marks this file as auto-generated
     # If you want to manually change it, remove the trait
-    trait is_auto_generated<system="ato_part", source="easyeda:C11702", date="2026-03-04T21:48:29.624269+00:00", checksum="53713d09295ac03ae0ed883dfd94fe3e500fa114f58c19b1bfa77876ec5d1011">
+    trait is_auto_generated<system="ato_part", source="easyeda:C11702", date="2026-03-04T21:48:29.624269+00:00", checksum="a2f698ca97a24aed1601659ef2bda4f8e75ce16f157f2c57a0d7f917914dd687">
 
     trait is_atomic_part<manufacturer="UNI-ROYAL", partnumber="0402WGF1001TCE", footprint="R0402.kicad_mod", symbol="0402WGF1001TCE.kicad_sym", model="R0402_L1.0-W0.5-H0.4.step">
     trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C11702", manufacturer="UNI-ROYAL", partno="0402WGF1001TCE">

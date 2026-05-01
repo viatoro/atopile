@@ -12,7 +12,7 @@ import faebryk.core.faebrykpy as fbrk
 import faebryk.core.node as fabll
 import faebryk.library._F as F
 from faebryk.core import graph
-from faebryk.core.solver.solver import Solver
+from faebryk.core.solver import Solver
 from faebryk.libs.picker.picker import PickedPart, PickError, pick_parts_recursively
 from faebryk.libs.smd import SMDSize
 from faebryk.libs.test.boundexpressions import BoundExpressions
@@ -24,6 +24,8 @@ if TYPE_CHECKING:
     from test.libs.picker.components import ComponentTestCase
 
 from test.libs.picker.components import components_to_test
+
+pytestmark = pytest.mark.easyeda
 
 logger = logging.getLogger(__name__)
 
@@ -103,9 +105,7 @@ def test_type_pick():
         .setup_from_center_rel(
             center=100,
             rel=0.1,
-            unit=F.Units.Ohm.bind_typegraph(tg=module.tg)
-            .create_instance(g=module.g)
-            .is_unit.get(),
+            unit=F.Units.Ohm.bind_typegraph(tg=module.tg).as_type_node().is_unit.get(),
         )
         .is_literal.get()
         .as_operand.get(),
@@ -402,6 +402,7 @@ def test_pick_error_group():
     assert isinstance(ex.value.exceptions[0], PickError)
 
 
+@pytest.mark.full_solver_only
 @pytest.mark.usefixtures("setup_project_config")
 def test_pick_dependency_simple():
     g = graph.GraphView.create()
@@ -426,6 +427,119 @@ def test_pick_dependency_simple():
 
     # assert app.r1.has_trait(F.Pickable.has_part_picked)
     # assert app.r2.has_trait(F.Pickable.has_part_picked)
+
+
+def test_simple_picker_picks_after_one_shot_safe():
+    import faebryk.libs.picker.api.picker_lib as picker_lib
+    from faebryk.libs.picker.picker import get_pick_tree, pick_topologically
+
+    g = graph.GraphView.create()
+    tg = fbrk.TypeGraph.create(g=g)
+
+    class _App(fabll.Node):
+        r1 = F.Resistor.MakeChild()
+        r2 = F.Resistor.MakeChild()
+
+    app = _App.bind_typegraph(tg=tg).create_instance(g=g)
+    tree = get_pick_tree(app)
+    picked: list[F.Pickable.is_pickable] = []
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        picker_lib,
+        "get_candidates",
+        lambda modules, solver: {module: [module] for module in modules},
+    )
+    monkeypatch.setattr(
+        picker_lib,
+        "attach_single_no_check",
+        lambda module, part, solver: picked.append(module),
+    )
+    try:
+        pick_topologically(tree, Solver())
+    finally:
+        monkeypatch.undo()
+
+    assert set(picked) == set(tree.keys())
+
+
+def test_simple_picker_bootstraps_once_before_picking():
+    import faebryk.libs.picker.api.picker_lib as picker_lib
+    from faebryk.core.solver.mutator import MutationMap
+    from faebryk.libs.picker.picker import get_pick_tree, pick_topologically
+
+    g = graph.GraphView.create()
+    tg = fbrk.TypeGraph.create(g=g)
+
+    class _App(fabll.Node):
+        r1 = F.Resistor.MakeChild()
+        r2 = F.Resistor.MakeChild()
+
+    app = _App.bind_typegraph(tg=tg).create_instance(g=g)
+    tree = get_pick_tree(app)
+    bootstrap_count = 0
+    original_bootstrap = MutationMap._with_relevance_set
+
+    def counted_bootstrap(*args, **kwargs):
+        nonlocal bootstrap_count
+        bootstrap_count += 1
+        return original_bootstrap(*args, **kwargs)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(MutationMap, "_with_relevance_set", counted_bootstrap)
+    monkeypatch.setattr(
+        picker_lib,
+        "get_candidates",
+        lambda modules, solver: {module: [module] for module in modules},
+    )
+    monkeypatch.setattr(
+        picker_lib,
+        "attach_single_no_check",
+        lambda module, part, solver: None,
+    )
+    try:
+        pick_topologically(tree, Solver())
+    finally:
+        monkeypatch.undo()
+
+    assert bootstrap_count == 1
+
+
+def test_simple_picker_rejects_unsafe_dependency_before_candidate_fetch():
+    import faebryk.libs.picker.api.picker_lib as picker_lib
+    from faebryk.libs.picker.picker import (
+        PickUnsafeOneShotError,
+        get_pick_tree,
+        pick_topologically,
+    )
+
+    g = graph.GraphView.create()
+    tg = fbrk.TypeGraph.create(g=g)
+    E = BoundExpressions(g=g, tg=tg)
+
+    class _App(fabll.Node):
+        r1 = F.Resistor.MakeChild()
+        r2 = F.Resistor.MakeChild()
+
+    app = _App.bind_typegraph(tg=tg).create_instance(g=g)
+    r1r = app.r1.get().resistance.get().can_be_operand.get()
+    r2r = app.r2.get().resistance.get().can_be_operand.get()
+    sum_lit = E.lit_op_range_from_center_rel((100000, E.U.Ohm), 0.2)
+    E.is_subset(E.add(r1r, r2r), sum_lit, assert_=True)
+    E.is_subset(r1r, E.subtract(sum_lit, r2r), assert_=True)
+    E.is_subset(r2r, E.subtract(sum_lit, r1r), assert_=True)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        picker_lib,
+        "get_candidates",
+        lambda modules, solver: pytest.fail("candidate fetch should not run"),
+    )
+    try:
+        with pytest.raises(PickUnsafeOneShotError, match="both as a target"):
+            pick_topologically(get_pick_tree(app), Solver())
+    finally:
+        monkeypatch.undo()
 
 
 @pytest.mark.usefixtures("setup_project_config")

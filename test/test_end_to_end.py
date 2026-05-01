@@ -14,7 +14,7 @@ from atopile import config
 from atopile.build_steps import muster
 from atopile.compiler.build import _build_from_ctx
 from atopile.compiler.parse import parse_text_as_file
-from faebryk.core.solver.solver import Solver
+from faebryk.core.solver import Solver
 from faebryk.libs.kicad.fileformats import kicad
 
 

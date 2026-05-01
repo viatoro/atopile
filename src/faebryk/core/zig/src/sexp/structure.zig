@@ -1630,7 +1630,8 @@ fn decodeWrappedWithExpectedSymbol(comptime T: type, allocator: std.mem.Allocato
 pub fn loads(comptime T: type, allocator: std.mem.Allocator, in: input, expected_symbol: []const u8) !T {
     switch (in) {
         .path => {
-            const file_content = try std.fs.cwd().readFileAlloc(allocator, in.path, 200 * 1024 * 1024);
+            const io = std.Io.Threaded.global_single_threaded.io();
+            const file_content = try std.Io.Dir.cwd().readFileAlloc(io, in.path, allocator, .limited(200 * 1024 * 1024));
             defer allocator.free(file_content);
             const tokens = try tokenizer.tokenize(allocator, file_content);
             defer allocator.free(tokens);
@@ -1744,19 +1745,20 @@ pub fn dumps(data: anytype, allocator: std.mem.Allocator, symbol_name: []const u
             sexp.* = wrapped;
         },
         .string, .path => {
-            var raw = std.array_list.Managed(u8).init(allocator);
+            var raw = std.Io.Writer.Allocating.init(allocator);
             defer raw.deinit();
-            try encodeWrappedStream(data, allocator, symbol_name, raw.writer());
-            const out_str = try ast.SExp.prettify_sexp_string(allocator, raw.items);
+            try encodeWrappedStream(data, allocator, symbol_name, &raw.writer);
+            const out_str = try ast.SExp.prettify_sexp_string(allocator, raw.writer.buffered());
             switch (out) {
                 .string => |s| {
                     s.* = out_str;
                 },
                 .path => |p| {
                     defer allocator.free(out_str);
-                    const file = try std.fs.cwd().createFile(p, .{ .truncate = true });
-                    defer file.close();
-                    try file.writeAll(out_str);
+                    const io = std.Io.Threaded.global_single_threaded.io();
+                    const file = try std.Io.Dir.cwd().createFile(io, p, .{ .truncate = true });
+                    defer file.close(io);
+                    try file.writeStreamingAll(io, out_str);
                 },
                 .sexp => unreachable,
             }

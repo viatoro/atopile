@@ -12,37 +12,18 @@ import json
 import logging
 import os
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Literal
 
 import faebryk.core.node as fabll
 import faebryk.library._F as F
-from faebryk.core.solver.solver import Solver
+from faebryk.core.solver import Solver
 
 logger = logging.getLogger(__name__)
 
-CURRENT_TIME = datetime.now().isoformat(timespec="seconds")
-
-
-# Variable types matching the VariablesPanel.tsx types
-VariableType = Literal[
-    "voltage",
-    "current",
-    "resistance",
-    "capacitance",
-    "ratio",
-    "frequency",
-    "power",
-    "percentage",
-    "dimensionless",
-]
 
 # Source of the variable value
 VariableSource = Literal["user", "derived", "picked", "datasheet"]
-
-# Export format options
-ExportFormat = Literal["json", "markdown", "txt"]
 
 
 @dataclass
@@ -51,11 +32,7 @@ class Variable:
 
     name: str
     spec: str | None = None
-    specTolerance: str | None = None
     actual: str | None = None
-    actualTolerance: str | None = None
-    unit: str | None = None
-    type: VariableType = "dimensionless"
     meetsSpec: bool | None = None
     source: VariableSource = "derived"
 
@@ -85,164 +62,6 @@ class JSONVariablesOutput:
 
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent)
-
-    def _flatten_nodes(
-        self, nodes: list[VariableNode], parent_path: str = ""
-    ) -> list[tuple[str, Variable]]:
-        """
-        Flatten a hierarchical node tree into a list of (path, variable) tuples.
-
-        Args:
-            nodes: List of VariableNode to flatten
-            parent_path: Parent path prefix for building full paths
-
-        Returns:
-            List of (full_path, Variable) tuples
-        """
-        result: list[tuple[str, Variable]] = []
-        for node in nodes:
-            current_path = f"{parent_path}.{node.name}" if parent_path else node.name
-            for var in node.variables:
-                result.append((current_path, var))
-            result.extend(self._flatten_nodes(node.children, current_path))
-        return result
-
-    def to_markdown(self, add_timestamp: bool = True) -> str:
-        """
-        Convert a JSONVariablesOutput to a markdown table string.
-        The table includes columns for: Module, Parameter, Spec, Actual, Unit, Source.
-
-        Returns:
-            A markdown formatted table string
-        """
-        flat = self._flatten_nodes(self.nodes)
-
-        md = "# Variables Report"
-        if add_timestamp:
-            md += f"\n\ngenerated on: {CURRENT_TIME}"
-        if self.build_id:
-            md += f"\n\nbuild_id: {self.build_id}"
-        md += "\n\n"
-        md += "| Module | Parameter | Spec | Actual | Unit | Source |\n"
-        md += "| --- | --- | --- | --- | --- | --- |\n"
-
-        # Group by module path for cleaner output
-        current_module = ""
-        for path, var in sorted(flat, key=lambda x: (x[0], x[1].name)):
-            # Escape pipe characters in values
-            def escape(s: str | None) -> str:
-                return str(s).replace("|", "\\|") if s else ""
-
-            # Build spec string with tolerance
-            spec = escape(var.spec)
-            if var.specTolerance:
-                spec += f" {escape(var.specTolerance)}"
-
-            # Build actual string with tolerance
-            actual = escape(var.actual) if var.actual else ""
-            if var.actualTolerance:
-                actual += f" {escape(var.actualTolerance)}"
-
-            # Show module name only on first parameter of each module
-            module_cell = f"`{escape(path)}`" if path != current_module else ""
-            current_module = path
-
-            md += (
-                f"| {module_cell} | "
-                f"`{escape(var.name)}` | "
-                f"`{spec}` | "
-                f"`{actual}` | "
-                f"`{escape(var.unit)}` | "
-                f"{escape(var.source)} |\n"
-            )
-
-        return md
-
-    def to_txt(self, add_timestamp: bool = True) -> str:
-        """
-        Convert a JSONVariablesOutput to a plain text string.
-        The output is formatted with module paths as headers and indented
-        parameter details below each module.
-
-        Returns:
-            A plain text formatted string
-        """
-        flat = self._flatten_nodes(self.nodes)
-
-        # Group variables by module path
-        by_module: dict[str, list[Variable]] = {}
-        for path, var in flat:
-            if path not in by_module:
-                by_module[path] = []
-            by_module[path].append(var)
-
-        txt = "# Variables Report"
-        if add_timestamp:
-            txt += f"\n\ngenerated on: {CURRENT_TIME}"
-        if self.build_id:
-            txt += f"\nbuild_id: {self.build_id}"
-        txt += "\n\n"
-        for module_path in sorted(by_module.keys()):
-            variables = by_module[module_path]
-            txt += f"{module_path}\n"
-            for var in sorted(variables, key=lambda v: v.name):
-                # Build value string
-                value = var.spec or ""
-                if var.specTolerance:
-                    value += f" {var.specTolerance}"
-                if var.unit and var.unit not in value:
-                    value += f" [{var.unit}]"
-
-                # Add actual value if present and different from spec
-                if var.actual and var.actual != var.spec:
-                    actual_str = var.actual
-                    if var.actualTolerance:
-                        actual_str += f" {var.actualTolerance}"
-                    value += f" (actual: {actual_str})"
-
-                txt += f"    {var.name}: {value}\n"
-
-        return txt
-
-
-def _get_variable_type_from_unit(unit_str: str | None) -> VariableType:
-    """Map unit symbol to variable type."""
-    if not unit_str:
-        return "dimensionless"
-
-    unit_lower = unit_str.lower()
-
-    # Voltage
-    if unit_lower in ("v", "mv", "µv", "uv", "kv"):
-        return "voltage"
-    # Current
-    if unit_lower in ("a", "ma", "µa", "ua", "na", "pa"):
-        return "current"
-    # Resistance (ohm symbol variants)
-    if any(r in unit_lower for r in ("ω", "ohm", "kohm", "kω", "mω", "mohm")):
-        return "resistance"
-    # Capacitance
-    if unit_lower in ("f", "pf", "nf", "µf", "uf", "mf"):
-        return "capacitance"
-    # Frequency
-    if unit_lower in ("hz", "khz", "mhz", "ghz"):
-        return "frequency"
-    # Power
-    if unit_lower in ("w", "mw", "µw", "uw", "kw"):
-        return "power"
-    # Percentage
-    if unit_lower in ("%", "percent"):
-        return "percentage"
-
-    # Check for SI base unit patterns
-    if "s⁻³·m²·kg" in unit_str and "a⁻²" in unit_str.lower():
-        return "resistance"
-    if "s⁻³·m²·kg" in unit_str and "a⁻¹" in unit_str.lower():
-        return "voltage"
-    if "s⁴·m⁻²·kg⁻¹" in unit_str:
-        return "capacitance"
-
-    return "dimensionless"
 
 
 def _get_node_type(module: fabll.Node) -> Literal["module", "interface", "component"]:
@@ -304,70 +123,6 @@ def _get_source_type(module: fabll.Node) -> VariableSource:
     return "derived"
 
 
-def _extract_tolerance_from_value(value_str: str) -> tuple[str, str | None, str | None]:
-    """
-    Extract the base value, tolerance, and unit from a value string.
-
-    Examples:
-        "10 ± 1%" -> ("10", "±1%", None)
-        "10kohm +/- 5%" -> ("10", "±5%", "kohm")
-        "1±20.0%F" -> ("1", "±20.0%", "F")
-        "5V" -> ("5", None, "V")
-        "{8000..12000}Ω" -> ("{8000..12000}", None, "Ω")
-
-    Returns:
-        (base_value, tolerance, unit)
-    """
-    import re
-
-    if not value_str:
-        return value_str, None, None
-
-    # Common unit symbols to extract from the end
-    unit_pattern = (
-        r"([VAFΩΩΩΩS W Hz J N Pa C T H]|"
-        r"[kKmMµunpfGT][VAFΩΩS W Hz J N Pa C T H]|"
-        r"ohm|kohm|Mohm|mol|rad|sr|kg|cd)$"
-    )
-
-    # First extract unit from the end (if present)
-    unit_match = re.search(unit_pattern, value_str)
-    unit = None
-    value_without_unit = value_str
-    if unit_match:
-        unit = unit_match.group(1)
-        value_without_unit = value_str[: unit_match.start()]
-
-    # Look for ± or +/- patterns
-    for sep in ("±", " ± ", " +/- ", "+/-"):
-        if sep in value_without_unit:
-            parts = value_without_unit.split(sep, 1)
-            base = parts[0].strip()
-            tol_part = parts[1].strip()
-            # Re-extract unit from tolerance part if not already found
-            if not unit:
-                tol_unit_match = re.search(unit_pattern, tol_part)
-                if tol_unit_match:
-                    unit = tol_unit_match.group(1)
-                    tol_part = tol_part[: tol_unit_match.start()]
-            tol = "±" + tol_part
-            # Append unit to base if found
-            if unit:
-                base = base + unit
-            return base, tol, unit
-
-    # No tolerance found, return base with unit
-    if unit:
-        return value_without_unit + unit, None, unit
-    return value_str, None, None
-
-
-def _strip_outer_braces(value: str) -> str:
-    if value.startswith("{") and value.endswith("}") and len(value) > 2:
-        return value[1:-1]
-    return value
-
-
 def _extract_module_data(
     module: fabll.Node,
     solver: Solver,
@@ -385,10 +140,10 @@ def _extract_module_data(
 
     # Get full hierarchical path from root using get_full_name
     # This gives paths like "app.ad1938_driver.i2c_ins[0]"
-    full_path = module.get_full_name(types=False, include_uuid=False)
+    full_path = module.get_full_name(types=False, include_root=False)
 
     # Make path relative to app root by removing the app root prefix
-    app_prefix = app_root.get_full_name(types=False, include_uuid=False)
+    app_prefix = app_root.get_full_name(types=False, include_root=False)
     if full_path.startswith(app_prefix + "."):
         path = full_path[len(app_prefix) + 1 :]
     elif full_path == app_prefix:
@@ -431,43 +186,13 @@ def _extract_module_data(
             value_set = solver.try_extract_superset(param_trait)
             if value_set is None:
                 continue
-            value_str = value_set.pretty_str()
-
-            # Extract tolerance and unit from the value string
-            base_value, tolerance, extracted_unit = _extract_tolerance_from_value(
-                value_str
-            )
-            base_value = _strip_outer_braces(base_value)
-
-            # Get unit - prefer the one from the parameter trait, fall back to extracted
-            unit_str = None
-            try:
-                unit = param_trait.try_get_units()
-                if unit:
-                    unit_str = F.Units.is_unit.compact_repr(unit)
-            except Exception:
-                pass
-
-            # Use extracted unit if we couldn't get one from the trait
-            if not unit_str and extracted_unit:
-                unit_str = extracted_unit
-
-            # Determine variable type from unit
-            var_type = _get_variable_type_from_unit(unit_str)
+            spec_value = value_set.pretty_str()
 
             actual_value = None
-            actual_tolerance = None
             if part_trait:
                 try:
                     if attr_lit := part_trait.get_attribute(param_name):
-                        actual_value_str = attr_lit.pretty_str()
-                        actual_value, actual_tolerance, actual_unit = (
-                            _extract_tolerance_from_value(actual_value_str)
-                        )
-                        if actual_value:
-                            actual_value = _strip_outer_braces(actual_value)
-                        if not unit_str and actual_unit:
-                            unit_str = actual_unit
+                        actual_value = attr_lit.pretty_str()
                 except Exception:
                     pass
 
@@ -475,12 +200,8 @@ def _extract_module_data(
                 variables.append(
                     Variable(
                         name=param_name,
-                        spec=base_value,
-                        specTolerance=tolerance,
+                        spec=spec_value,
                         actual=actual_value,
-                        actualTolerance=actual_tolerance,
-                        unit=unit_str,
-                        type=var_type,
                         meetsSpec=None,
                         source=module_source,
                     )
@@ -489,10 +210,7 @@ def _extract_module_data(
                 variables.append(
                     Variable(
                         name=param_name,
-                        spec=base_value,
-                        specTolerance=tolerance,
-                        unit=unit_str,
-                        type=var_type,
+                        spec=spec_value,
                         source="derived",
                     )
                 )
@@ -732,38 +450,22 @@ def write_variables_to_file(
     solver: Solver,
     path: Path,
     build_id: str | None = None,
-    formats: Sequence[ExportFormat] = ("json",),
 ) -> None:
-    """Write a variables report to file(s) in the specified format(s).
+    """Write a variables report as JSON.
 
     Args:
         app: The application root node
         solver: The solver used for parameter resolution
-        path: Output file path (extension will be replaced based on format)
+        path: Output file path (.json)
         build_id: Build ID from server (links to build history)
-        formats: List of export formats to write (json, markdown, txt)
     """
     if not path.parent.exists():
         os.makedirs(path.parent)
 
     output = make_json_variables(app, solver, build_id=build_id)
+    output_path = path.with_suffix(".json")
 
-    # Map formats to file extensions and content generators
-    format_config: dict[ExportFormat, tuple[str, str]] = {
-        "json": (".json", output.to_json()),
-        "markdown": (".md", output.to_markdown()),
-        "txt": (".txt", output.to_txt()),
-    }
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(output.to_json())
 
-    for fmt in formats:
-        if fmt not in format_config:
-            logger.warning(f"Unknown export format: {fmt}")
-            continue
-
-        ext, content = format_config[fmt]
-        output_path = path.with_suffix(ext)
-
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        logger.info(f"Wrote {fmt} variables to {output_path}")
+    logger.info(f"Wrote variables to {output_path}")

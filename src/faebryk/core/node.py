@@ -34,7 +34,7 @@ from faebryk.libs.util import (
 )
 
 if TYPE_CHECKING:
-    from faebryk.core.solver.solver import Solver
+    from faebryk.core.solver import Solver
 
 
 class _UniqueKey:
@@ -743,7 +743,7 @@ class Path:
             re.sub(
                 r"[^|]*?\.ato::",
                 "",
-                node.get_full_name(types=True, include_uuid=False),
+                node.get_full_name(types=True, include_root=False),
             )
             for node in self._get_nodes_in_order()
         )
@@ -1059,6 +1059,11 @@ class Node[T: NodeAttributes = NodeAttributes](metaclass=NodeMeta):
                     source_chunk_node=source_chunk_node,
                 )
         elif isinstance(field, _EdgeField):
+            # Ensure any type references in edge paths are registered in tg
+            for path in [field.lhs, field.rhs]:
+                for segment in path:
+                    if isinstance(segment, type) and issubclass(segment, Node):
+                        TypeNodeBoundTG.get_or_create_type_in_tg(tg=t.tg, t=segment)
             if type_field:
                 type_node = t.get_or_create_type()
                 edge_instance = field.edge.create_edge(
@@ -1518,17 +1523,20 @@ class Node[T: NodeAttributes = NodeAttributes](metaclass=NodeMeta):
         return self.bind_instance(instance=g.bind(node=self.instance.node()))
 
     def get_full_name(
-        self, types: bool = False, include_uuid: bool = True, with_detail: bool = False
+        self, types: bool = False, include_root: bool = True, with_detail: bool = False
     ) -> str:
         """
         Returns node name + heirarchy
         """
         from faebryk.library.has_name_override import has_name_override
+        from faebryk.library.is_app_root import is_app_root
 
         # Try to get name override, but gracefully handle missing TypeGraph
         # (can happen during solver mutation when nodes are in copied graphs)
         try:
-            if (has_name := self.try_get_trait(has_name_override)) is not None:
+            if (include_root or not self.has_trait(is_app_root)) and (
+                has_name := self.try_get_trait(has_name_override)
+            ) is not None:
                 return has_name.get_name(with_detail=with_detail)
         except FabLLException:
             pass  # No TypeGraph available, fall through to default naming
@@ -1538,15 +1546,15 @@ class Node[T: NodeAttributes = NodeAttributes](metaclass=NodeMeta):
             parent_node, name = parent
             if not parent_node.no_include_parents_in_full_name:
                 if parent_full := parent_node.get_full_name(
-                    types=types, include_uuid=include_uuid, with_detail=with_detail
+                    types=types, include_root=include_root, with_detail=with_detail
                 ):
                     parts.append(parent_full)
             if name:
                 parts.append(name)
-            elif include_uuid:
+            elif include_root:
                 parts.append(self.get_root_id())
         elif not self.no_include_parents_in_full_name:
-            if include_uuid:
+            if include_root:
                 parts.append(self.get_root_id())
 
         base = ".".join(parts)
@@ -1559,7 +1567,7 @@ class Node[T: NodeAttributes = NodeAttributes](metaclass=NodeMeta):
         return re.sub(
             r"[^|]*?\.ato::",
             "",
-            self.get_full_name(types=True, include_uuid=False),
+            self.get_full_name(types=True, include_root=False),
         )
 
     @property
@@ -1880,7 +1888,7 @@ class TypeNodeBoundTG[N: NodeT, A: NodeAttributes]:
             ).edge()
         )
 
-    def as_type_node(self) -> "NodeT":
+    def as_type_node(self) -> N:
         return self.t.bind_instance(instance=self.get_or_create_type())
 
     def create_instance(self, g: graph.GraphView, attributes: A | None = None) -> N:
@@ -2284,7 +2292,7 @@ class is_module(Node):
         return Traits.get_obj_raw(Traits.bind(self))
 
     def get_module_locator(self) -> str:
-        return self.get_obj().get_full_name(include_uuid=False, types=True)
+        return self.get_obj().get_full_name(include_root=False, types=True)
 
 
 class is_interface(Node):
@@ -2513,7 +2521,10 @@ class TreeRenderer:
                 if isinstance(value, str):
                     return f'"{TreeRenderer.truncate_text(value)}"'
                 return str(value)
-            case _ if type_name.endswith("Enums") or type_name == "AbstractEnums":
+            case _ if type_name == "AbstractEnums" or (
+                (seen := Node._seen_types.get(type_name)) is not None
+                and issubclass(seen, F.Literals.AbstractEnums)
+            ):
                 bound = F.Literals.AbstractEnums.bind_instance(node)
                 values = bound.get_values()
                 if len(values) == 1:
@@ -3430,6 +3441,144 @@ def test_tg_merge_copy():
     print(GraphRenderer().render(tg2.get_self_node()))
 
     assert dict(tg2.get_type_instance_overview())[_MyType2._type_identifier()] == 2
+
+
+def test_tree_renderer_extract_literal_value():
+    """Test TreeRenderer.extract_literal_value works for all literal types."""
+    from enum import StrEnum
+
+    import faebryk.library._F as F
+
+    g, tg = _make_graph_and_typegraph()
+
+    # --- Strings ---
+    singlestr = (
+        F.Literals.Strings.bind_typegraph(tg=tg)
+        .create_instance(g=g)
+        .setup_from_values("hello")
+    )
+    assert TreeRenderer.extract_literal_value(singlestr.instance, "Strings") == (
+        '"hello"'
+    )
+
+    str_multi = (
+        F.Literals.Strings.bind_typegraph(tg=tg)
+        .create_instance(g=g)
+        .setup_from_values("a", "b", "c")
+    )
+    result = TreeRenderer.extract_literal_value(str_multi.instance, "Strings")
+    assert result is not None
+    assert '"a"' in result
+    assert '"b"' in result
+    assert '"c"' in result
+
+    # --- Counts ---
+    counts_single = (
+        F.Literals.Counts.bind_typegraph(tg=tg)
+        .create_instance(g=g)
+        .setup_from_values([42])
+    )
+    assert TreeRenderer.extract_literal_value(counts_single.instance, "Counts") == "42"
+
+    counts_multi = (
+        F.Literals.Counts.bind_typegraph(tg=tg)
+        .create_instance(g=g)
+        .setup_from_values([1, 2, 3])
+    )
+    result = TreeRenderer.extract_literal_value(counts_multi.instance, "Counts")
+    assert result is not None
+    assert "1" in result
+    assert "2" in result
+    assert "3" in result
+
+    # --- Booleans ---
+    bool_single = (
+        F.Literals.Booleans.bind_typegraph(tg=tg)
+        .create_instance(g=g)
+        .setup_from_values(True)
+    )
+    assert (
+        TreeRenderer.extract_literal_value(bool_single.instance, "Booleans") == "True"
+    )
+
+    bool_multi = (
+        F.Literals.Booleans.bind_typegraph(tg=tg)
+        .create_instance(g=g)
+        .setup_from_values(True, False)
+    )
+    result = TreeRenderer.extract_literal_value(bool_multi.instance, "Booleans")
+    assert result is not None
+    assert "True" in result
+    assert "False" in result
+
+    # --- NumericSet ---
+    num_singleton = (
+        F.Literals.NumericSet.bind_typegraph(tg=tg)
+        .create_instance(g=g)
+        .setup_from_singleton(3.14)
+    )
+    result = TreeRenderer.extract_literal_value(num_singleton.instance, "NumericSet")
+    assert result is not None
+    assert "3.14" in result
+
+    num_interval = (
+        F.Literals.NumericSet.bind_typegraph(tg=tg)
+        .create_instance(g=g)
+        .setup_from_interval((1.0, 10.0))
+    )
+    result = TreeRenderer.extract_literal_value(num_interval.instance, "NumericSet")
+    assert result is not None
+    assert "1" in result
+    assert "10" in result
+
+    # --- Enums: concrete type (setup path) ---
+    class TempCoeff(StrEnum):
+        X5R = "X5R"
+        X7R = "X7R"
+        C0G = "C0G"
+
+    ConcreteT = F.Literals.EnumsFactory(TempCoeff)
+
+    setup_lit = (
+        ConcreteT.bind_typegraph(tg=tg).create_instance(g=g).setup(TempCoeff.X7R)
+    )
+    setup_type_name = setup_lit.get_type_name()
+    assert setup_type_name is not None
+    assert setup_type_name != "AbstractEnums"
+    assert (
+        TreeRenderer.extract_literal_value(setup_lit.instance, setup_type_name)
+        == "'X7R'"
+    )
+
+    # --- Enums: base AbstractEnums (MakeChild path) ---
+    base_lit = F.Literals.AbstractEnums.bind_typegraph(tg=tg).create_instance(g=g)
+    concrete_type_node = ConcreteT.bind_typegraph(tg=tg).as_type_node()
+    x7r_value = F.Literals.AbstractEnums.get_enum_value(
+        s=concrete_type_node, tg=tg, name="X7R"
+    )
+    base_lit.values.get().append(x7r_value)
+    assert base_lit.get_type_name() == "AbstractEnums"
+    assert (
+        TreeRenderer.extract_literal_value(base_lit.instance, "AbstractEnums")
+        == "'X7R'"
+    )
+
+    # --- Enums: multiple values ---
+    multi_lit = (
+        ConcreteT.bind_typegraph(tg=tg)
+        .create_instance(g=g)
+        .setup(TempCoeff.X5R, TempCoeff.X7R, TempCoeff.C0G)
+    )
+    multi_type_name = multi_lit.get_type_name()
+    assert multi_type_name is not None
+    result = TreeRenderer.extract_literal_value(multi_lit.instance, multi_type_name)
+    assert result is not None
+    assert "X5R" in result
+    assert "X7R" in result
+    assert "C0G" in result
+
+    # --- Unknown type returns None ---
+    assert TreeRenderer.extract_literal_value(singlestr.instance, "UnknownType") is None
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 
 import faebryk
+from faebryk.libs.util import app_root
 
 logger = logging.getLogger(__name__)
 
@@ -15,9 +16,9 @@ def ROOT_PATH() -> Path:
     editable_root = Path(faebryk.__file__).parent.parent.parent
     if (editable_root / _RESOURCES_SUFFIX).exists():
         return editable_root
-    cwd_root = Path.cwd()
-    if (cwd_root / _RESOURCES_SUFFIX).exists():
-        return cwd_root
+    project_root = app_root()
+    if (project_root / _RESOURCES_SUFFIX).exists():
+        return project_root
     raise FileNotFoundError("Could not find root directory")
 
 

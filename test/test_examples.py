@@ -5,21 +5,18 @@ from pathlib import Path
 
 import pytest
 
-from faebryk.libs.util import repo_root as _repo_root
+from faebryk.libs.util import app_root as _app_root
 from faebryk.libs.util import run_live
 
 # Get the examples directory relative to this test file
-EXAMPLES_DIR = _repo_root() / "examples"
+EXAMPLES_DIR = _app_root() / "examples"
 
 SLOW_EXAMPLES = [
     "led_badge",
 ]
 
 # FIXME: These examples are currently failing and need to be fixed
-SKIP_EXAMPLES = [
-    "equations",
-    "esp32_minimal",
-]
+SKIP_EXAMPLES: list[str] = []
 
 
 @pytest.mark.not_in_ci  # requires kicad-cli

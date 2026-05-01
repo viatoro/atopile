@@ -3,6 +3,7 @@ const std = @import("std");
 const pointer_mod = @import("pointer.zig");
 const composition_mod = @import("composition.zig");
 const typegraph_mod = @import("typegraph.zig");
+const cast = @import("cast");
 
 const graph = graph_mod.graph;
 const visitor = graph_mod.visitor;
@@ -88,7 +89,7 @@ pub const Linker = struct {
             list: *std.array_list.Managed(UnresolvedTypeReference),
 
             pub fn visit(self_ptr: *anyopaque, edge: graph.BoundEdgeReference) visitor.VisitResult(void) {
-                const ctx: *@This() = @ptrCast(@alignCast(self_ptr));
+                const ctx = cast.ctx(@This(), self_ptr);
                 const make_child = edge.g.bind(EdgeComposition.get_child_node(edge.edge));
                 const type_reference = TypeGraph.MakeChildNode.get_type_reference(make_child);
 
@@ -107,7 +108,7 @@ pub const Linker = struct {
             list: *std.array_list.Managed(UnresolvedTypeReference),
 
             pub fn visit(self_ptr: *anyopaque, edge: graph.BoundEdgeReference) visitor.VisitResult(void) {
-                const ctx: *@This() = @ptrCast(@alignCast(self_ptr));
+                const ctx = cast.ctx(@This(), self_ptr);
                 const type_node = edge.g.bind(EdgeComposition.get_child_node(edge.edge));
 
                 var make_children_ctx = VisitMakeChildren{ .type_graph = ctx.type_graph, .type_node = type_node, .list = ctx.list };

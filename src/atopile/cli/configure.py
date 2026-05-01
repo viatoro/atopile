@@ -20,7 +20,7 @@ def setup() -> None:
         logger.warning(f"Couldn't remove legacy config file: {e!r}")
 
     # if running is ci skip plugin installation
-    from atopile.telemetry import PropertyLoaders
+    from atopile.telemetry.properties import PropertyLoaders
 
     if PropertyLoaders.ci_provider():
         return

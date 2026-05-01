@@ -1,10 +1,6 @@
 """Standalone layout-editor server.
 
 CLI entry point: ``python -m atopile.layout_server <path.kicad_pcb> [--port 8100]``.
-
-Only the CLI, the ``create_app`` factory, and the index / static-file serving
-live here.  All API routes and the ``LayoutService`` are shared with the
-backend integration server.
 """
 
 from __future__ import annotations
@@ -32,26 +28,19 @@ FRONTEND_DIR = Path(__file__).parent / "frontend"
 TEMPLATE_PATH = STATIC_DIR / "layout-editor.hbs"
 
 
-# ---------------------------------------------------------------------------
-# Template rendering
-# ---------------------------------------------------------------------------
-
-
 def _render_layout_template(
     *,
-    api_url: str,
-    api_prefix: str,
     ws_path: str,
     editor_uri: str,
+    editor_css_uri: str,
     nonce: str = "",
     csp: str,
 ) -> str:
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
     values = {
-        "apiUrl": api_url,
-        "apiPrefix": api_prefix,
         "wsPath": ws_path,
         "editorUri": editor_uri,
+        "editorCssUri": editor_css_uri,
         "nonce": nonce,
         "csp": csp,
     }
@@ -60,19 +49,26 @@ def _render_layout_template(
     return template
 
 
-# ---------------------------------------------------------------------------
-# FastAPI application factory
-# ---------------------------------------------------------------------------
+def _normalize_base_path(base_path: str) -> str:
+    if not base_path or base_path == "/":
+        return ""
+    return "/" + base_path.strip("/")
 
 
-def create_app(pcb_path: Path) -> FastAPI:
-    service = LayoutService()
-    service.load(pcb_path)
-
+def create_app_for_service(service: LayoutService, *, base_path: str = "") -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         await service.start_watcher()
         yield
+
+    base_path = _normalize_base_path(base_path)
+    ws_path = f"{base_path}/ws" if base_path else "/ws"
+    editor_uri = f"{base_path}/static/editor.js" if base_path else "/static/editor.js"
+    editor_css_uri = (
+        f"{base_path}/static/editor.css" if base_path else "/static/editor.css"
+    )
+    index_path = f"{base_path}/" if base_path else "/"
+    static_path = f"{base_path}/static" if base_path else "/static"
 
     app = FastAPI(title="PCB Layout Editor", lifespan=lifespan)
 
@@ -83,47 +79,43 @@ def create_app(pcb_path: Path) -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Shared layout routes at /api/* and /ws
-    app.include_router(create_layout_router(service, api_prefix="/api", ws_path="/ws"))
+    app.include_router(create_layout_router(service, ws_path=ws_path))
 
-    # --- Static files & index page ---
-
-    @app.get("/")
-    async def index():
+    @app.get(index_path)
+    async def index() -> HTMLResponse:
         html = _render_layout_template(
-            api_url="",
-            api_prefix="/api",
-            ws_path="/ws",
-            editor_uri="/static/editor.js",
+            ws_path=ws_path,
+            editor_uri=editor_uri,
+            editor_css_uri=editor_css_uri,
             csp=(
                 "default-src 'self'; "
-                "style-src 'self' 'unsafe-inline'; "
+                "style-src 'self'; "
                 "script-src 'self' 'unsafe-inline'; "
                 "connect-src 'self' ws: wss:;"
             ),
         )
         return HTMLResponse(html)
 
-    app.mount(
-        "/static",
-        StaticFiles(directory=str(STATIC_DIR)),
-        name="static",
-    )
-
+    app.mount(static_path, StaticFiles(directory=str(STATIC_DIR)), name="static")
     return app
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
+def create_app(pcb_path: Path) -> FastAPI:
+    service = LayoutService()
+    service.load(pcb_path)
+    return create_app_for_service(service)
 
 
 def _ensure_editor_bundle() -> None:
-    npm = shutil.which("npm")
-    if not npm:
+    bun = shutil.which("bun")
+    if not bun:
+        home_bun = Path.home() / ".bun" / "bin" / "bun"
+        if home_bun.is_file():
+            bun = str(home_bun)
+    if not bun:
         raise RuntimeError(
-            "npm is not installed; cannot build layout editor bundle. "
-            "Run `npm --prefix src/atopile/layout_server/frontend run build`."
+            "bun is not installed; cannot build layout editor bundle. "
+            "Run `bun --cwd src/atopile/layout_server/frontend run build`."
         )
     if not FRONTEND_DIR.is_dir():
         raise RuntimeError(
@@ -131,16 +123,18 @@ def _ensure_editor_bundle() -> None:
         )
 
     typer.echo("Building layout editor frontend assets...", err=True)
-    result = subprocess.run([npm, "run", "build"], cwd=str(FRONTEND_DIR), check=False)
+    result = subprocess.run([bun, "run", "build"], cwd=str(FRONTEND_DIR), check=False)
     if result.returncode != 0:
         raise RuntimeError(
             "Failed to build layout editor bundle. "
-            "Run `npm --prefix src/atopile/layout_server/frontend run build`."
+            "Run `bun --cwd src/atopile/layout_server/frontend run build`."
         )
     editor_js = STATIC_DIR / "editor.js"
-    if not editor_js.is_file():
+    editor_css = STATIC_DIR / "editor.css"
+    if not editor_js.is_file() or not editor_css.is_file():
         raise RuntimeError(
-            "Layout editor build reported success but `editor.js` is still missing."
+            "Layout editor build reported success but required editor assets "
+            "are still missing."
         )
 
 

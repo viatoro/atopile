@@ -1,58 +1,11 @@
-import Resistor
-import ElectricPower
-import ElectricSignal
-
-module VoltageDivider:
-    """
-    A voltage divider using two resistors.
-
-    Connect to the `power` and `output` interfaces
-    Configure via:
-    - `power.voltage`
-    - `output.reference.voltage`
-    - `max_current`
-    """
-
-    # External interfaces
-    power = new ElectricPower
-    output = new ElectricSignal
-
-    # Components
-    r_bottom = new Resistor
-    r_top = new Resistor
-
-    # Variables
-    v_in: V
-    v_out: V
-    max_current: A
-    total_resistance: Ω
-    ratio: dimensionless
-    r_total: Ω
-
-    # Connections
-    power.hv ~> r_top ~> output.line ~> r_bottom ~> power.lv
-
-    # Link interface voltages
-    assert v_out is output.reference.voltage
-    assert v_in is power.voltage
-
-    # Equations - rearranged a few ways to simplify for the solver
-    assert r_top.resistance is (v_in / max_current) - r_bottom.resistance
-    assert r_bottom.resistance is (v_in / max_current) - r_top.resistance
-    assert r_top.resistance is (v_in - v_out) / max_current
-    assert r_bottom.resistance is v_out / max_current
-    assert r_bottom.resistance is r_total * ratio
-    assert r_top.resistance is r_total * (1 - ratio)
-
-    # Calculate outputs
-    assert r_total is r_top.resistance + r_bottom.resistance
-    assert v_out is v_in * r_bottom.resistance / r_total
-    assert v_out is v_in * ratio
-    assert max_current is v_in / r_total
-    assert ratio is r_bottom.resistance / r_total
+import ResistorVoltageDivider
 
 module App:
-    my_vdiv = new VoltageDivider
-    assert my_vdiv.power.voltage is 10V +/- 1%
-    assert my_vdiv.output.reference.voltage within 3.3V +/- 10%
-    assert my_vdiv.max_current within 10uA to 100uA
+    my_vdiv = new ResistorVoltageDivider
+
+    assert my_vdiv.v_in within 10V +/- 1%
+    assert my_vdiv.v_out within 3.3V +/- 10%
+    assert my_vdiv.current within 50uA +/- 10%
+
+    my_vdiv.chain.resistors[0].package = "R0402"
+    my_vdiv.chain.resistors[1].package = "R0402"

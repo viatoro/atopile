@@ -1,0 +1,309 @@
+/* iBOM Panel — split layout */
+.ibom-app {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+  font-size: var(--vscode-font-size, 13px);
+}
+
+/* --- Sidebar container --- */
+.ibom-sidebar-container {
+  flex-shrink: 0;
+  min-width: 240px;
+  max-width: 800px;
+  height: 100%;
+  overflow: hidden;
+}
+
+.ibom-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+/* --- Resize handle --- */
+.ibom-resize-handle {
+  width: 4px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: var(--vscode-panel-border, var(--vscode-editorGroup-border, #444));
+  transition: background 0.15s;
+}
+.ibom-resize-handle:hover,
+.ibom-resize-handle:active {
+  background: var(--vscode-focusBorder, #007fd4);
+}
+
+/* --- PCB viewer container --- */
+.ibom-viewer-container {
+  flex: 1;
+  min-width: 200px;
+  height: 100%;
+  position: relative;
+}
+
+.ibom-viewer {
+  width: 100%;
+  height: 100%;
+}
+
+/* Constrain the layout shell status bar to the viewer area */
+.ibom-viewer-container #status {
+  position: absolute;
+}
+
+/* --- Sidebar --- */
+.ibom-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.ibom-sidebar-header {
+  padding: 8px;
+  border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-editorGroup-border, #333));
+}
+
+/* --- Summary bar --- */
+.ibom-summary {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 4px 6px;
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  border-radius: 4px;
+  flex-wrap: wrap;
+}
+
+.ibom-summary-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+}
+
+.ibom-summary-value {
+  font-weight: 600;
+  font-family: var(--vscode-editor-font-family, monospace);
+  color: var(--vscode-editor-foreground);
+}
+
+.ibom-summary-label {
+  color: var(--vscode-descriptionForeground);
+}
+
+.ibom-summary-sep {
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.4;
+  font-size: 11px;
+}
+
+.ibom-summary-item.primary .ibom-summary-value {
+  color: var(--vscode-terminal-ansiGreen, #4ec9b0);
+}
+
+.ibom-summary-item.warning .ibom-summary-value {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+/* --- BOM list --- */
+.ibom-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px;
+}
+
+/* --- BOM row (single line: qty, badge, designators, value) --- */
+.ibom-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.ibom-row:hover,
+.ibom-row.hovered {
+  background: var(--vscode-list-hoverBackground);
+}
+.ibom-row.selected {
+  background: var(--vscode-list-inactiveSelectionBackground, rgba(255, 255, 255, 0.06));
+}
+
+.ibom-row-qty {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  font-weight: 500;
+  font-family: var(--vscode-editor-font-family, monospace);
+  flex-shrink: 0;
+  min-width: 18px;
+  text-align: right;
+}
+
+.ibom-type-badge {
+  flex-shrink: 0;
+  min-width: 22px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.ibom-type-badge-spacer {
+  width: 22px;
+  flex-shrink: 0;
+}
+
+.ibom-row-designators {
+  font-size: 12px;
+  color: var(--vscode-editor-foreground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+  min-width: 40px;
+}
+
+.ibom-row-value {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  text-align: right;
+}
+
+.ibom-row-stock-warning {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+/* --- Empty state --- */
+.ibom-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+}
+
+/* --- Detail section (fixed bottom panel) --- */
+.ibom-detail-section {
+  flex-shrink: 0;
+  border-top: 1px solid var(--vscode-panel-border, var(--vscode-editorGroup-border, #333));
+  height: 280px;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+.ibom-detail {
+  padding: 8px;
+}
+
+.ibom-detail-dash {
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.5;
+}
+
+.ibom-datasheet-link {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  font-size: 12px;
+}
+.ibom-datasheet-link:hover {
+  text-decoration: underline;
+}
+
+.ibom-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ibom-detail-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+/* Detail table using shared Table component */
+.ibom-detail-table {
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.ibom-detail-table .table-wrapper {
+  overflow: visible;
+}
+
+.ibom-detail-label {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  white-space: nowrap;
+  width: 80px;
+}
+
+.mono {
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.ibom-cost {
+  color: var(--vscode-terminal-ansiGreen, #4ec9b0);
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.ibom-stock-ok {
+  color: var(--vscode-terminal-ansiGreen, #4ec9b0);
+}
+
+.ibom-stock-warning {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+/* --- Detail members sub-list --- */
+.ibom-detail-members {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--vscode-panel-border, var(--vscode-editorGroup-border, #333));
+}
+
+.ibom-detail-members-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ibom-member-btn {
+  all: unset;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  background: var(--vscode-input-background);
+  color: var(--vscode-textLink-foreground, #3794ff);
+  border: 1px solid var(--vscode-input-border, transparent);
+  transition: background 0.1s;
+}
+.ibom-member-btn:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+.ibom-member-btn.selected {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+  border-color: var(--vscode-focusBorder);
+}

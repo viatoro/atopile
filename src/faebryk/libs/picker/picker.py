@@ -10,8 +10,9 @@ from typing import Iterable
 import faebryk.core.faebrykpy as fbrk
 import faebryk.core.node as fabll
 import faebryk.library._F as F
-from faebryk.core.solver.solver import Solver
-from faebryk.core.solver.utils import Contradiction
+from faebryk.core.solver import Solver
+from faebryk.core.solver.simple_solver import SafetyError
+from faebryk.core.solver.utils import FULL_SOLVER, Contradiction
 from faebryk.libs.app.keep_picked_parts import (
     get_pcb_sourced_constraints,
     has_pcb_source,
@@ -25,6 +26,7 @@ from faebryk.libs.util import (
     bfs_visit,
     debug_perf,
     indented_container,
+    md_list,
 )
 
 NO_PROGRESS_BAR = ConfigFlag("NO_PROGRESS_BAR", default=False)
@@ -69,6 +71,16 @@ class PickVerificationError(PickError):
     def __init__(self, message: str, *modules: fabll.Node):
         message = f"Post-pick verification failed for picked parts:\n{message}"
         super().__init__(message, *modules)
+
+
+class PickUnsafeOneShotError(PickError):
+    def __init__(self, error: SafetyError, *modules: F.Pickable.is_pickable):
+        module_list = md_list(
+            f"`{module.get_pickable_node().get_full_name()}`" for module in modules
+        )
+        message = f"{error}\n\nWhile picking parts for:\n{module_list}"
+        self.safety_error = error
+        super().__init__(message, *(module.get_pickable_node() for module in modules))
 
 
 class PickErrorChildren(PickError):
@@ -333,10 +345,10 @@ def _infer_uncorrelated_params(tree: Tree["F.Pickable.is_pickable"]):
 
 def _collect_relevant_params(
     modules: Iterable["F.Pickable.is_pickable"],
-) -> list["F.Parameters.can_be_operand"]:
+) -> list["F.Parameters.is_parameter"]:
     """Collect all pickable parameters from modules."""
     return [
-        p.as_operand.get()
+        p
         for m in modules
         if (
             pbt := m.get_parent_of_type(
@@ -454,8 +466,7 @@ def _pick_tree(
             if not (relevant := _collect_relevant_params(item.modules)):
                 continue
 
-            g, tg = next(iter(relevant)).g, next(iter(relevant)).tg
-            item.solver.simplify(g, tg, terminal=False, relevant=relevant)
+            item.solver.simplify_for(*relevant, terminal=False)
 
             groups = find_independent_groups(item.modules)
             group_solvers = [next(item.solver.fork()) for _ in range(len(groups))]
@@ -525,6 +536,50 @@ def _pick_tree(
     return pick_tree
 
 
+def _pick_tree_one_shot(
+    initial_modules: set["F.Pickable.is_pickable"],
+    solver: Solver,
+    picker_lib,
+    progress: Advancable | None,
+) -> Tree[PickNodeData]:
+    ordered_modules = sorted(
+        initial_modules,
+        key=lambda m: m.get_pickable_node().get_full_name(),
+    )
+    if not ordered_modules:
+        return Tree()
+
+    if relevant := _collect_relevant_params(ordered_modules):
+        try:
+            solver.simplify_for(*relevant, terminal=False)
+        except SafetyError as ex:
+            raise PickUnsafeOneShotError(ex, *ordered_modules) from ex
+    module_tree = _list_to_hack_tree(ordered_modules)
+    group_candidates = picker_lib.get_candidates(module_tree, solver)
+    if no_candidates := [m for m, cs in group_candidates.items() if not cs]:
+        raise PickError(f"No candidates found for {no_candidates}", *no_candidates)
+
+    pick_tree: Tree[PickNodeData] = Tree()
+    for module in ordered_modules:
+        part = next(iter(group_candidates[module]))
+        module_name = module.get_pickable_node().get_full_name()
+        logger.info(f"  Picking {module_name}")
+        picker_lib.attach_single_no_check(module, part, solver)
+        if progress:
+            progress.advance()
+
+        pick_tree[
+            PickNodeData(
+                depth=0,
+                module_count=1,
+                branching_factor=1,
+                module_name=module_name,
+            )
+        ] = Tree()
+
+    return pick_tree
+
+
 def pick_topologically(
     tree: Tree["F.Pickable.is_pickable"],
     solver: Solver,
@@ -557,33 +612,44 @@ def pick_topologically(
         _pick_explicit_modules(explicit_modules)
         tree, _ = update_pick_tree(tree)
 
-    _infer_uncorrelated_params(tree)
-
     timings.add("setup")
 
-    with timings.measure("pick tree"):
-        if all_modules := set(tree.keys()):
-            pick_tree: Tree[PickNodeData] = _pick_tree(
-                all_modules, solver, picker_lib, progress
-            )
-            logger.info(
-                "Picking tree (d=depth, b=branching_factor):\n" + pick_tree.pretty()
-            )
-        else:
-            pick_tree = Tree()
+    if not FULL_SOLVER:
+        with timings.measure("pick tree"):
+            if all_modules := set(tree.keys()):
+                pick_tree = _pick_tree_one_shot(
+                    all_modules, solver, picker_lib, progress
+                )
+                logger.info(
+                    "Picking tree (d=depth, b=branching_factor):\n" + pick_tree.pretty()
+                )
+            else:
+                pick_tree = Tree()
+    else:
+        _infer_uncorrelated_params(tree)
+
+        with timings.measure("pick tree"):
+            if all_modules := set(tree.keys()):
+                pick_tree = _pick_tree(all_modules, solver, picker_lib, progress)
+                logger.info(
+                    "Picking tree (d=depth, b=branching_factor):\n" + pick_tree.pretty()
+                )
+            else:
+                pick_tree = Tree()
 
     if _pick_count:
         logger.info(f"Picked parts in {timings.get_formatted('pick tree')}")
 
-    if relevant := _collect_relevant_params(tree_backup):
-        g, tg = next(iter(relevant)).g, next(iter(relevant)).tg
+    if not FULL_SOLVER:
+        return
 
+    if relevant := _collect_relevant_params(tree_backup):
         with timings.measure("verify design"):
             logger.info("Verify design")
             try:
-                solver.simplify(g, tg, terminal=True, relevant=relevant)
+                solver.simplify_for(*relevant, terminal=True)
             except Contradiction as e:
-                error_msg = _format_pcb_contradiction_error(e, tg)
+                error_msg = _format_pcb_contradiction_error(e, next(iter(relevant)).tg)
                 raise PickVerificationError(error_msg, *tree_backup) from e
         solver.commit()
         logger.info(f"Verified design in {timings.get_formatted('verify design')}")

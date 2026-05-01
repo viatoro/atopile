@@ -119,4 +119,18 @@
 		(options "")
 		(descr "atopile: part lib: UNI_ROYAL_0603WAF1002T5E")
 	)
+	(lib
+		(name "UNI_ROYAL_0402WGF9091TCE")
+		(type "KiCad")
+		(uri "${KIPRJMOD}/../../parts/UNI_ROYAL_0402WGF9091TCE")
+		(options "")
+		(descr "atopile: part lib: UNI_ROYAL_0402WGF9091TCE")
+	)
+	(lib
+		(name "KOA_Speer_Elec_RK73H1ETTP1821F")
+		(type "KiCad")
+		(uri "${KIPRJMOD}/../../parts/KOA_Speer_Elec_RK73H1ETTP1821F")
+		(options "")
+		(descr "atopile: part lib: KOA_Speer_Elec_RK73H1ETTP1821F")
+	)
 )

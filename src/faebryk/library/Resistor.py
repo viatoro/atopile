@@ -44,13 +44,28 @@ class Resistor(fabll.Node):
                 "max_power": max_power,
                 "max_voltage": max_voltage,
             },
+            package_prefix="R",
         ),
+    )
+
+    _is_eseries = fabll.Traits.MakeEdge(
+        F.is_eseries_value.MakeChild(
+            series=F.is_eseries_value.Series.E96,
+            tolerance=0.01,
+            practical_range=(1.0, 10e6),  # 1 Ω to 10 MΩ
+        ),
+        [resistance],
     )
 
     S = F.has_simple_value_representation.Spec
     _simple_repr = fabll.Traits.MakeEdge(
         F.has_simple_value_representation.MakeChild(
-            S(resistance, tolerance=True),
+            S(
+                resistance,
+                format_mode=(
+                    F.has_simple_value_representation.FormatMode.VALUE_WITH_TOLERANCE
+                ),
+            ),
             S(max_power),
             S(max_voltage),
         )

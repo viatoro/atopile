@@ -4,12 +4,11 @@
 import os
 import shutil
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import platformdirs
 
-from faebryk.libs.util import ConfigFlagString, once, robustly_rm_dir
+from faebryk.libs.util import ConfigFlagString, once
 
 _LOG_DIR_OVERRIDE = ConfigFlagString("LOG_DIR", descr="Override the log directory path")
 
@@ -64,29 +63,9 @@ def get_data_dir() -> Path:
         return Path.home() / ".local" / "share" / "atopile"
 
 
-def get_cache_dir() -> Path:
-    try:
-        return Path(platformdirs.user_cache_dir("atopile"))
-    except Exception:
-        return Path.home() / ".cache" / "atopile"
-
-
 def get_log_dir() -> Path:
     if override := _LOG_DIR_OVERRIDE.get():
         p = Path(override)
         p.mkdir(parents=True, exist_ok=True)
         return p
     return Path(platformdirs.user_log_dir("atopile", ensure_exists=True))
-
-
-def remove_log_dir() -> bool:
-    try:
-        robustly_rm_dir(get_log_dir())
-        return True
-    except Exception:
-        return False
-
-
-def get_log_file(name: str) -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return get_log_dir() / f"{name}_{timestamp}.log"

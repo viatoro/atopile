@@ -9,7 +9,7 @@ import pytest
 
 from atopile.cli.package import _PackageValidators
 from atopile.errors import UserBadParameterError
-from faebryk.libs.util import repo_root as _repo_root
+from faebryk.libs.util import app_root as _app_root
 from faebryk.libs.util import run_live
 
 
@@ -23,7 +23,7 @@ def _strip_ansi(text: str) -> str:
 
 
 # Get the examples directory relative to this test file
-EXAMPLES_DIR = _repo_root() / "examples"
+EXAMPLES_DIR = _app_root() / "examples"
 
 
 @pytest.mark.parametrize("package", ["atopile/addressable-leds"])

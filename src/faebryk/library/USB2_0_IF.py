@@ -16,6 +16,9 @@ class USB2_0_IF(fabll.Node):
     #                 traits
     # ----------------------------------------
     _is_interface = fabll.Traits.MakeEdge(fabll.is_interface.MakeChild())
+    is_data_interface = fabll.Traits.MakeEdge(
+        F.DataInterface.is_data_interface.MakeChild()
+    )
 
     net_names = [
         fabll.Traits.MakeEdge(
@@ -52,6 +55,9 @@ class USB2_0_IF(fabll.Node):
         ),
         # Differential impedance: 90 Ohm +/- 15% (USB 2.0 spec section 7.1.1)
         F.Literals.Numbers.MakeChild_SetSuperset(
-            [d, F.DifferentialPair.impedance], 76.5, 103.5, unit=F.Units.Ohm
+            [d, F.DifferentialPair.differential_impedance],
+            76.5,
+            103.5,
+            unit=F.Units.Ohm,
         ),
     ]

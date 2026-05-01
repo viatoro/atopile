@@ -38,7 +38,6 @@ def test_atogen_basic_part():
 
     assert ato == _cleanup(
         """
-        #pragma experiment("TRAITS")
         import is_atomic_part
         import is_auto_generated
 
@@ -58,7 +57,6 @@ def test_atogen_postmod():
 
     assert cf.dump() == _cleanup(
         """
-        #pragma experiment("TRAITS")
         import is_atomic_part
 
         component BLA:
@@ -73,7 +71,6 @@ def test_atogen_postmod():
 
     assert cf.dump() == _cleanup(
         """
-        #pragma experiment("TRAITS")
         import is_atomic_part
 
         component BLA:
@@ -84,7 +81,6 @@ def test_atogen_postmod():
 
 def test_parse_regression_1():
     file = _cleanup("""
-        #pragma experiment("TRAITS")
         import has_designator_prefix
         import has_part_picked
         import is_atomic_part

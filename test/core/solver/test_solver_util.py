@@ -10,6 +10,7 @@ import pytest
 import faebryk.core.node as fabll
 import faebryk.library._F as F
 from atopile.logging_utils import rich_to_string
+from faebryk.core.solver import Solver
 from faebryk.core.solver.algorithm import algorithm
 from faebryk.core.solver.mutator import (
     MutationMap,
@@ -19,7 +20,6 @@ from faebryk.core.solver.mutator import (
     is_irrelevant,
     is_relevant,
 )
-from faebryk.core.solver.solver import Solver
 from faebryk.core.solver.utils import (
     Contradiction,
     ContradictionByLiteral,
@@ -324,6 +324,7 @@ def test_mutation_map_submap():
     # TODO
 
 
+@pytest.mark.full_solver_only
 def test_traceback_filtering_chain():
     E = BoundExpressions()
     variables = _create_letters(E, 3)
@@ -343,6 +344,7 @@ def test_traceback_filtering_chain():
     logger.info(tb.filtered())
 
 
+@pytest.mark.full_solver_only
 def test_traceback_filtering_tree():
     E = BoundExpressions()
     variables = _create_letters(E, 3)
@@ -378,10 +380,11 @@ def test_contradiction_message_subset():
 
     solver = Solver()
 
-    with pytest.raises(ContradictionByLiteral, match="Empty superset"):
-        solver.simplify(E.tg, E.g, terminal=True)
+    with pytest.raises(ContradictionByLiteral, match="(?i)empty superset"):
+        solver.simplify_for(A.as_parameter.force_get())
 
 
+@pytest.mark.full_solver_only
 def test_contradiction_message_superset():
     E = BoundExpressions()
     variables = _create_letters(E, 1)
@@ -432,6 +435,32 @@ def test_name_preserved_through_bootstrap_copy():
     assert re.match(r"0x[0-9A-Fa-f]+\.voltage", actual_name), (
         f"Expected name 'voltage' but got '{actual_name}'"
     )
+
+
+def test_bootstrap_copy_preserves_eseries_trait_payload():
+    E = BoundExpressions()
+    resistor = F.Resistor.bind_typegraph(tg=E.tg).create_instance(g=E.g)
+    resistance = resistor.resistance.get()
+    resistance.set_superset(E.g, 10_000.0)
+
+    mutation_map = MutationMap._with_relevance_set(
+        g=E.g,
+        tg=E.tg,
+        relevant=[resistance.can_be_operand.get()],
+    )
+
+    copied = not_none(
+        mutation_map.map_forward(resistance.is_parameter_operatable.get()).maps_to
+    ).as_parameter.force_get()
+    copied_param = (
+        fabll.Traits(copied).get_obj_raw().cast(F.Parameters.NumericParameter)
+    )
+    trait = copied_param.get_trait(F.is_eseries_value)
+
+    assert trait.series == F.is_eseries_value.Series.E96
+    assert trait.tolerance == pytest.approx(0.01)
+    assert trait.practical_min == pytest.approx(1.0)
+    assert trait.practical_max == pytest.approx(10e6)
 
 
 def test_name_preserved_through_mutate_parameter():

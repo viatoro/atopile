@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402
 """
 CI test orchestrator using FastAPI and custom workers.
 
@@ -10,6 +11,7 @@ import datetime
 import os
 import queue
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -18,8 +20,26 @@ from pathlib import Path
 
 import uvicorn
 
-# Ensure we can import from test package
-sys.path.insert(0, os.getcwd())
+APP_ROOT = Path(__file__).resolve().parents[2]
+SRC_ROOT = APP_ROOT / "src"
+ARTIFACTS_ROOT = APP_ROOT / "artifacts"
+
+
+def _pythonpath_entries() -> list[str]:
+    return [str(APP_ROOT), str(SRC_ROOT)]
+
+
+def _update_pythonpath(env: dict[str, str]) -> None:
+    existing = [entry for entry in env.get("PYTHONPATH", "").split(os.pathsep) if entry]
+    env["PYTHONPATH"] = os.pathsep.join(
+        dict.fromkeys([*_pythonpath_entries(), *existing])
+    )
+
+
+# Ensure we can import local test modules regardless of the caller's cwd.
+for entry in reversed(_pythonpath_entries()):
+    if entry not in sys.path:
+        sys.path.insert(0, entry)
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -57,7 +77,7 @@ from test.runner.report import (
 from test.runner.report import (
     set_globals as set_report_globals,
 )
-from test.runner.ui import LOG_VIEWER_DIST_DIR
+from test.runner.ui import WEBVIEW_DIST_DIR
 from test.runner.ui import router as ui_router
 from test.runner.ui import set_globals as set_ui_globals
 
@@ -84,11 +104,11 @@ ORCHESTRATOR_TIMEOUT = float(os.getenv("FBRK_TEST_TEST_TIMEOUT", "0"))
 CLAIM_TIMEOUT = float(os.getenv("FBRK_TEST_CLAIM_TIMEOUT", "30"))
 
 # Local baselines config
-BASELINES_DIR = Path("artifacts/baselines")
+BASELINES_DIR = ARTIFACTS_ROOT / "baselines"
 BASELINES_INDEX = BASELINES_DIR / "index.json"
 
 # Remote baselines cache config
-REMOTE_BASELINES_DIR = Path("artifacts/baselines/remote")
+REMOTE_BASELINES_DIR = BASELINES_DIR / "remote"
 REMOTE_COMMIT_LIMIT = int(os.getenv("FBRK_TEST_REMOTE_COMMIT_LIMIT", "50"))
 SKIP_REMOTE_BASELINES = os.getenv("FBRK_TEST_SKIP_REMOTE_BASELINES", "").lower() in (
     "1",
@@ -96,7 +116,7 @@ SKIP_REMOTE_BASELINES = os.getenv("FBRK_TEST_SKIP_REMOTE_BASELINES", "").lower()
     "yes",
 )
 
-LOG_DIR = Path("artifacts/logs")
+LOG_DIR = ARTIFACTS_ROOT / "logs"
 
 # Global state
 test_queue: queue.Queue[str] = queue.Queue()
@@ -117,15 +137,11 @@ aggregator: TestAggregator | None = None
 app = FastAPI()
 app.include_router(orchestrator_router)
 app.include_router(ui_router)
-
-# Mount log viewer static assets at root (must be last - acts as fallback)
-# Specific routes like /logs, /report take precedence over this catch-all
-# Only mount if the directory exists (it won't in CI where frontend isn't built)
-if LOG_VIEWER_DIST_DIR.exists():
+if WEBVIEW_DIST_DIR.exists():
     app.mount(
-        "/",
-        StaticFiles(directory=LOG_VIEWER_DIST_DIR, html=False),
-        name="log-viewer-static",
+        "/webview-dist",
+        StaticFiles(directory=WEBVIEW_DIST_DIR, html=False),
+        name="webview-dist",
     )
 
 
@@ -165,43 +181,35 @@ class ReportTimer:
             self._thread.join(timeout=1.0)
 
 
+def _is_port_in_use(port: int, host: str) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind((host, port))
+        except OSError:
+            return True
+    return False
+
+
 def get_free_port(
-    start_port: int = 50000, fallback_port: int = 51000, max_attempts: int = 100
+    start_port: int | None = None,
+    bind_host: str = ORCHESTRATOR_BIND_HOST,
 ) -> int:
     """
-    Find a free port starting from start_port.
+    Return a free port for the orchestrator.
 
-    First tries to kill any stale process on the preferred port to ensure
-    consistent port usage across test runs. This prevents issues where old
-    browser tabs connect to stale servers on different ports.
-
-    If the preferred port can't be freed, searches from fallback_port.
+    By default we bind to port 0 and let the OS choose a fresh ephemeral port.
+    This avoids stale runner workers from a previous run reconnecting to a new
+    orchestrator that reused the same fixed port. If a preferred port is passed,
+    we use it when available and otherwise fall back to a fresh ephemeral port.
     """
-    from atopile.server.server import is_port_in_use, kill_process_on_port
-
-    # Try to claim the preferred port first, killing any stale process
-    if is_port_in_use(start_port):
-        _print(f"Port {start_port} in use, killing stale process...")
-        if kill_process_on_port(start_port):
-            _print(f"Killed stale process on port {start_port}")
-            # Give OS time to release the port
-            time.sleep(0.2)
-            if not is_port_in_use(start_port):
-                return start_port
-
-    # If preferred port is free, use it
-    if not is_port_in_use(start_port):
+    if start_port is not None and not _is_port_in_use(start_port, bind_host):
         return start_port
 
-    # Fall back to finding any free port starting from fallback_port
-    _print(f"Port {start_port} still in use, searching from {fallback_port}...")
-    for attempt in range(max_attempts):
-        port = fallback_port + attempt
-        if not is_port_in_use(port):
-            return port
-    raise RuntimeError(
-        f"No free port found in range {fallback_port}-{fallback_port + max_attempts}"
-    )
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        probe.bind((bind_host, 0))
+        return int(probe.getsockname()[1])
 
 
 def collect_tests(
@@ -233,37 +241,19 @@ def collect_tests(
     env = os.environ.copy()
     # Ensure our in-repo pytest plugins (`test.runner.*`) are importable in the process.
     # (Workers already set PYTHONPATH similarly.)
-    env["PYTHONPATH"] = os.getcwd()
-    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    _update_pythonpath(env)
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=APP_ROOT,
+    )
     split = result.stdout.split("\n\n", maxsplit=1)
     stdout, summary = split if len(split) == 2 else (split[0], "")
-    errors_clean = dict[str, str]()
-    if result.returncode != 0:
-        _print("Error collecting tests:")
-        for line in result.stderr.splitlines():
-            _print(line)
-        # Also print stdout for collection errors
-        for line in stdout.splitlines():
-            _print(line)
-        # Parse collection errors from output
-        if "ERROR" in stdout:
-            current_file = None
-            current_error = []
-            for line in stdout.splitlines():
-                if line.startswith("ERROR "):
-                    if current_file and current_error:
-                        errors_clean[current_file] = "\n".join(current_error)
-                    # Extract file path from ERROR line
-                    parts = line.split(" ", 1)
-                    if len(parts) > 1:
-                        current_file = parts[1].strip()
-                        current_error = [line]
-                elif current_file:
-                    current_error.append(line)
-            if current_file and current_error:
-                errors_clean[current_file] = "\n".join(current_error)
 
-    # Parse tests, max_parallel markers, and worker_affinity from stdout
+    # Parse tests, max_parallel markers, and worker_affinity from stdout first,
+    # so we can determine whether collection actually succeeded.
     tests = []
     max_parallel: dict[str, int] = {}
     affinity_membership: dict[str, str] = {}
@@ -294,6 +284,42 @@ def collect_tests(
         if "::" in line:
             tests.append(line)
 
+    # Handle non-zero exit from pytest --collect-only
+    errors_clean = dict[str, str]()
+    has_collection_errors = "ERROR" in stdout
+    if result.returncode != 0:
+        if has_collection_errors:
+            # Parse and report collection errors (e.g. import failures)
+            _print("Collection errors:")
+            current_file = None
+            current_error = []
+            for line in stdout.splitlines():
+                if line.startswith("ERROR "):
+                    if current_file and current_error:
+                        errors_clean[current_file] = "\n".join(current_error)
+                    # Extract file path from ERROR line
+                    parts = line.split(" ", 1)
+                    if len(parts) > 1:
+                        current_file = parts[1].strip()
+                        current_error = [line]
+                elif current_file:
+                    current_error.append(line)
+            if current_file and current_error:
+                errors_clean[current_file] = "\n".join(current_error)
+            for error_value in errors_clean.values():
+                for line in error_value.splitlines():
+                    _print(f"  {line}")
+        if result.stderr.strip():
+            if not has_collection_errors:
+                _print("Warning: pytest collection had warnings:")
+            for line in result.stderr.splitlines():
+                _print(line)
+        if not tests and not has_collection_errors:
+            # No tests and no ERROR lines — dump full output for debugging
+            _print("Error collecting tests (no tests found):")
+            for line in stdout.splitlines():
+                _print(line)
+
     return tests, errors_clean, max_parallel, affinity_membership
 
 
@@ -316,6 +342,7 @@ def start_server(port) -> uvicorn.Server:
 
 def run_report_server(open_browser: bool = False) -> None:
     """Run the report server standalone (for --keep-open without running tests)."""
+    os.chdir(APP_ROOT)
     port = get_free_port()
     report_url = f"http://127.0.0.1:{port}/report"
     _print(f"Starting report server at {report_url}")
@@ -353,6 +380,8 @@ def main(
     extra_env: dict[str, str] | None = None,
 ):
     global tests_total, commit_info, ci_info, workers, aggregator, remote_baseline
+
+    os.chdir(APP_ROOT)
 
     # Set up globals for report module
     set_report_globals(test_queue, workers, commit_info, ci_info)
@@ -522,7 +551,7 @@ def main(
     env = os.environ.copy()
     env["FBRK_TEST_ORCHESTRATOR_URL"] = url
     # Ensure workers can find test modules
-    env["PYTHONPATH"] = os.getcwd()
+    _update_pythonpath(env)
     # no need to keep on recompiling zig
     # already done during discovery latest
     env["FBRK_ZIG_NORECOMPILE"] = "1"
@@ -566,7 +595,11 @@ def main(
         f = open(log_path, "w")
         worker_files.append(f)
         p = subprocess.Popen(
-            [sys.executable, str(worker_script)], env=env, stdout=f, stderr=f
+            [sys.executable, str(worker_script)],
+            env=env,
+            cwd=APP_ROOT,
+            stdout=f,
+            stderr=f,
         )
         workers[i] = p
         aggregator.register_worker(i, p.pid)
@@ -686,6 +719,33 @@ def main(
 
     total_duration = (datetime.datetime.now() - aggregator.start_time).total_seconds()
     _print(f"Total time: {format_duration(total_duration)}")
+
+    # Print summary of failed/errored/crashed/timed-out tests
+    failure_outcomes = {Outcome.FAILED, Outcome.ERROR, Outcome.CRASHED, Outcome.TIMEOUT}
+    with aggregator._lock:
+        failures_by_outcome: dict[Outcome, list[TestState]] = {}
+        for t in aggregator._tests.values():
+            if t.outcome in failure_outcomes:
+                failures_by_outcome.setdefault(t.outcome, []).append(t)
+
+    if failures_by_outcome:
+        _print("")
+        for outcome in (
+            Outcome.FAILED,
+            Outcome.ERROR,
+            Outcome.CRASHED,
+            Outcome.TIMEOUT,
+        ):
+            tests_list = failures_by_outcome.get(outcome, [])
+            if not tests_list:
+                continue
+            _print(f"{outcome.name} ({len(tests_list)}):")
+            for t in tests_list:
+                msg = f"  {t.nodeid}"
+                if t.error_message:
+                    msg += f" - {t.error_message}"
+                _print(msg)
+        _print("")
 
     report = aggregator.generate_reports(periodic=False)
 

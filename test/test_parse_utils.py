@@ -6,7 +6,7 @@ from pygments import token as pygments_token
 import atopile
 import atopile.compiler.parse
 import atopile.compiler.parse_utils
-from faebryk.libs.util import repo_root as _repo_root
+from faebryk.libs.util import app_root as _app_root
 
 
 def _parser(src: str):
@@ -29,7 +29,7 @@ def test_reconstructor_simple_stmt(txt: str):
     assert atopile.compiler.parse_utils.reconstruct(_parser(txt).simple_stmt()) == txt
 
 
-repo_root = _repo_root()
+repo_root = _app_root()
 EXAMPLES_DIR = repo_root / "examples"
 
 

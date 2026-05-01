@@ -1,7 +1,7 @@
 import contextlib
 import hashlib
 from dataclasses import dataclass, field
-from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import faebryk.core.faebrykpy as fbrk
@@ -9,10 +9,10 @@ import faebryk.core.graph as graph
 import faebryk.core.node as fabll
 import faebryk.library._F as F
 from atopile.config import BuildType, config
-from atopile.dataclasses import BuildStage
+from atopile.data_models import BuildStage
 from atopile.errors import UserToolNotAvailableError, accumulate
 from atopile.logging import get_logger
-from faebryk.core.solver.solver import Solver
+from faebryk.core.solver import Solver
 from faebryk.libs.util import once
 
 if TYPE_CHECKING:
@@ -21,9 +21,9 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def generate_build_id(project_path: str, target: str, timestamp: str) -> str:
+def generate_build_id(project_path: str, target: str, started_at: float) -> str:
     """
-    Generate a unique build ID from project, target, and timestamp.
+    Generate a unique build ID from project, target, and start time.
 
     This is the single source of truth for build ID generation.
     All components (server, CLI, logging) must use this function.
@@ -31,18 +31,29 @@ def generate_build_id(project_path: str, target: str, timestamp: str) -> str:
     Args:
         project_path: Absolute path to the project root
         target: Build target name
-        timestamp: Timestamp string in format "%Y-%m-%d_%H-%M-%S"
+        started_at: Unix epoch float from time.time()
 
     Returns:
         16-character hex string (truncated SHA256 hash)
     """
-    content = f"{project_path}:{target}:{timestamp}"
+    content = f"{project_path}:{target}:{started_at}"
     return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
-def generate_build_timestamp() -> str:
-    """Generate a build timestamp in the standard format."""
-    return datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+def ensure_project_dependencies(working_dir: Path | None = None) -> None:
+    from atopile.config import config
+    from faebryk.libs.project.dependencies import ProjectDependencies
+    from faebryk.libs.util import global_lock
+
+    if working_dir is not None:
+        config.apply_options(None, working_dir=working_dir)
+
+    lock_path = config.project.paths.modules / ".lock"
+    with global_lock(lock_path):
+        deps = ProjectDependencies(sync_versions=True)
+        if deps.not_installed_dependencies:
+            logger.info("Installing missing dependencies")
+            deps.install_missing_dependencies()
 
 
 @dataclass
@@ -123,12 +134,15 @@ def run_build_targets(ctx: BuildStepContext) -> None:
     # Count targets from DAG without materializing the generator
     # (the generator yields based on succeeded status which we can't check upfront)
     subgraph = build_steps.muster.dependency_dag.get_subgraph(
-        selector_func=lambda name: name in targets
-        or any(
-            alias in targets
-            for alias in build_steps.muster.targets.get(
-                name, build_steps.MusterTarget(name="", aliases=[], func=lambda _: None)
-            ).aliases
+        selector_func=lambda name: (
+            name in targets
+            or any(
+                alias in targets
+                for alias in build_steps.muster.targets.get(
+                    name,
+                    build_steps.MusterTarget(name="", aliases=[], func=lambda _: None),
+                ).aliases
+            )
         )
     )
     all_target_names = set(subgraph.topologically_sorted())
@@ -149,19 +163,20 @@ def run_build_targets(ctx: BuildStepContext) -> None:
     # Write total stage count to database so parent can show accurate progress
     build_id = os.environ.get("ATO_BUILD_ID") or ctx.build_id
     if build_id:
-        from atopile.dataclasses import Build, BuildStatus
+        from atopile.data_models import BuildStatus
         from atopile.model.sqlite import BuildHistory
 
-        # Just update total_stages - set() will merge with existing record
-        BuildHistory.set(
-            Build(
-                build_id=build_id,
-                name=config.build.name,
-                display_name=config.build.name,
-                status=BuildStatus.BUILDING,
-                total_stages=total_stages,
+        existing = BuildHistory.get(build_id)
+        if existing is not None:
+            BuildHistory.set(
+                existing.model_copy(
+                    update={
+                        "name": config.build.name,
+                        "status": BuildStatus.BUILDING,
+                        "total_stages": total_stages,
+                    }
+                )
             )
-        )
 
     # Iterate generator properly - it yields targets only when their deps have succeeded
     with accumulate() as accumulator:
@@ -225,15 +240,50 @@ def build(
         ctx: Optional build context to use (allows caller to access completed_stages)
 
     Returns:
-        The built app node, or None if no app was instantiated (e.g. glb-only builds)
+        The built app node, or None if no app was instantiated.
     """
     if ctx is None:
         ctx = BuildStepContext(build=None, app=app)
     else:
         ctx.app = app
     run_build_targets(ctx)
-    # Return app if available, None otherwise (e.g. for glb-only builds)
+    # Return app if available, None otherwise.
     return ctx.app or (ctx.build.app if ctx.build else None)
+
+
+def run_build_worker(build_name: str, build_id: str | None) -> None:
+    """Run a single build target in a worker process.
+
+    Shared entry point for both subprocess workers (ATO_BUILD_WORKER)
+    and multiprocessing workers (_mp_build_worker).  Sets up logging,
+    initialises the build-history DB, and calls build().
+    """
+    import sys
+
+    from atopile.errors import iter_leaf_exceptions
+    from atopile.logging import AtoLogger
+    from atopile.model.sqlite import BuildHistory, Logs
+
+    AtoLogger.activate_build(stage=build_name)
+    BuildHistory.init_db()
+    Logs.init_db()
+
+    AtoLogger.start_periodic_flush()
+
+    ctx = BuildStepContext(build=None, build_id=build_id)
+
+    try:
+        with config.select_build(build_name):
+            build(ctx=ctx)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        for e in iter_leaf_exceptions(exc):
+            logger.error(e, exc_info=e)
+        sys.exit(1)
+    finally:
+        AtoLogger.stop_periodic_flush()
+        AtoLogger.flush_all()
 
 
 def init_app() -> fabll.Node:

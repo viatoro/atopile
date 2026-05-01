@@ -19,6 +19,9 @@ import inspect
 import logging
 import re
 import textwrap
+import time
+from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
 from importlib.metadata import version as get_package_version
 from pathlib import Path
@@ -32,13 +35,17 @@ import faebryk.core.faebrykpy as fbrk
 import faebryk.core.graph as graph
 import faebryk.core.node as fabll
 import faebryk.library._F as F
+from atopile.compiler import DslImportError, DslRichException, DslUndefinedSymbolError
 from atopile.compiler import ast_types as AST
 from atopile.compiler.build import (
     BuildFileResult,
     Linker,
     StdlibRegistry,
-    build_source,
+    UnresolvedTypeReferencesError,
+    _build_from_ctx,
+    build_stage_2,
 )
+from atopile.compiler.parse import parse_text_as_file_recovering
 from atopile.compiler.parse_utils import get_src_info_from_token
 from atopile.config import find_project_dir
 from atopile.errors import (
@@ -47,13 +54,76 @@ from atopile.errors import (
     iter_leaf_exceptions,
 )
 from atopile.logging import get_logger
+from atopile.lsp.forkserver_broker import BROKER
 
 logger = get_logger(__name__)
+
+
+def _configure_lsp_logging() -> None:
+    # pygls/json-rpc emits a large volume of registration and wire-traffic logs
+    # at INFO, which drowns out the lifecycle events we actually care about.
+    logging.getLogger("pygls").setLevel(logging.WARNING)
+    logging.getLogger("pygls.server").setLevel(logging.WARNING)
+    logging.getLogger("pygls.protocol").setLevel(logging.WARNING)
+    logging.getLogger("pygls.protocol.json_rpc").setLevel(logging.ERROR)
+    logging.getLogger("pygls.feature_manager").setLevel(logging.WARNING)
+    logging.getLogger("pygls.workspace").setLevel(logging.WARNING)
+
+
+_configure_lsp_logging()
+
+
+def reset_type_caches() -> int:
+    """Clear graph-backed faebryk type caches."""
+    from faebryk.core.node import TypeNodeBoundTG
+
+    TypeNodeBoundTG.__TYPE_NODE_MAP__.clear()
+    pending = [fabll.Node]
+    cache_count = 0
+    while pending:
+        cls = pending.pop()
+        if type_cache := getattr(cls, "_type_cache", None):
+            cache_count += len(type_cache)
+            type_cache.clear()
+        pending.extend(cls.__subclasses__())
+    return cache_count
+
+
+def clear_type_caches_for_file(
+    file_path: Path, import_path: str | None = None
+) -> tuple[int, int]:
+    """Clear cached graph-backed types and type names for a file."""
+    cache_count = reset_type_caches()
+
+    prefixes = {str(file_path.resolve()) + "::"}
+    if import_path:
+        prefixes.add(import_path + "::")
+
+    file_type_count = 0
+    for type_id in list(fabll.Node._seen_types):
+        if any(type_id.startswith(prefix) for prefix in prefixes):
+            del fabll.Node._seen_types[type_id]
+            file_type_count += 1
+
+    return cache_count, file_type_count
+
 
 # LSP Server Configuration
 DISTRIBUTION_NAME = "atopile"
 TOOL_DISPLAY = "atopile"
 MAX_WORKERS = 5
+SEMANTIC_QUERY_METHODS = frozenset(
+    {
+        "hover",
+        "definition",
+        "type_definition",
+        "references",
+        "prepare_rename",
+        "rename",
+    }
+)
+BASE_QUERY_CAPABILITIES = frozenset({"completion", "code_action"})
+SEMANTIC_QUERY_CAPABILITIES = BASE_QUERY_CAPABILITIES | SEMANTIC_QUERY_METHODS
 
 LSP_SERVER = LanguageServer(
     name=DISTRIBUTION_NAME,
@@ -94,9 +164,8 @@ class DocumentState:
     """
     Holds the build state for a single document.
 
-    This allows us to keep the last successful build result even when
-    the current document has syntax errors, enabling completion/hover
-    to continue working.
+    State is always for the current generation only. Partial queries are allowed
+    when the current-generation build produced enough structure to support them.
     """
 
     uri: str
@@ -109,9 +178,11 @@ class DocumentState:
 
     # Build results
     build_result: BuildFileResult | None = None
+    query_capabilities: set[str] = field(default_factory=set)
 
     # AST node index for hover/go-to-definition: maps (line, col) to nodes
     ast_nodes: list[ASTNodeLocation] = field(default_factory=list)
+    invalid_ranges: list[lsp.Range] = field(default_factory=list)
 
     # Last build error (if any)
     last_error: Exception | None = None
@@ -119,8 +190,11 @@ class DocumentState:
     # Diagnostics from last build
     diagnostics: list[lsp.Diagnostic] = field(default_factory=list)
 
-    # ERC diagnostics (persisted separately, only updated on successful ERC check)
-    erc_diagnostics: list[lsp.Diagnostic] = field(default_factory=list)
+    # Resolved dependency paths for the last linked build
+    resolved_dependency_paths: set[Path] = field(default_factory=set)
+    phase_timings_ms: dict[str, float] = field(default_factory=dict)
+    profile_counts: dict[str, int] = field(default_factory=dict)
+    compiled_file_timings_ms: dict[str, float] = field(default_factory=dict)
 
     def ensure_graph(self) -> tuple[graph.GraphView, fbrk.TypeGraph, StdlibRegistry]:
         """Ensure graph infrastructure exists, creating if needed."""
@@ -143,7 +217,14 @@ class DocumentState:
         self.graph_view = None
         self.type_graph = None
         self.stdlib = None
+        self.build_result = None
+        self.query_capabilities = set()
         self.ast_nodes = []
+        self.invalid_ranges = []
+        self.resolved_dependency_paths = set()
+        self.phase_timings_ms = {}
+        self.profile_counts = {}
+        self.compiled_file_timings_ms = {}
 
 
 # Global document state storage
@@ -173,6 +254,70 @@ def get_file_contents(uri: str) -> tuple[Path, str]:
     """Get the file path and contents for a URI."""
     document = LSP_SERVER.workspace.get_text_document(uri)
     return Path(document.path), document.source
+
+
+def _broker_manages_document(uri: str) -> bool:
+    return BROKER.get_document(uri) is not None
+
+
+def _broker_query(uri: str, method: str, payload: dict[str, Any]) -> Any:
+    return BROKER.query(uri, method, payload)
+
+
+def _diagnostic_to_invalid_range(diagnostic: lsp.Diagnostic) -> lsp.Range:
+    return lsp.Range(
+        start=lsp.Position(
+            line=diagnostic.range.start.line,
+            character=diagnostic.range.start.character,
+        ),
+        end=lsp.Position(
+            line=diagnostic.range.end.line,
+            character=diagnostic.range.end.character,
+        ),
+    )
+
+
+def _position_in_range(position: lsp.Position, range_: lsp.Range) -> bool:
+    if position.line < range_.start.line or position.line > range_.end.line:
+        return False
+    if (
+        position.line == range_.start.line
+        and position.character < range_.start.character
+    ):
+        return False
+    if position.line == range_.end.line and position.character > range_.end.character:
+        return False
+    return True
+
+
+def _position_is_invalid(state: DocumentState, position: lsp.Position) -> bool:
+    return any(_position_in_range(position, range_) for range_ in state.invalid_ranges)
+
+
+def _range_overlaps_invalid_region(state: DocumentState, range_: lsp.Range) -> bool:
+    for invalid_range in state.invalid_ranges:
+        if _position_in_range(range_.start, invalid_range) or _position_in_range(
+            range_.end, invalid_range
+        ):
+            return True
+        if _position_in_range(invalid_range.start, range_) or _position_in_range(
+            invalid_range.end, range_
+        ):
+            return True
+    return False
+
+
+def _compute_query_capabilities(
+    build_result: BuildFileResult | None,
+    ast_nodes: list[ASTNodeLocation],
+    type_graph: fbrk.TypeGraph | None,
+    graph_view: graph.GraphView | None,
+) -> set[str]:
+    capabilities = set(BASE_QUERY_CAPABILITIES)
+    if build_result is None or type_graph is None or graph_view is None:
+        return capabilities
+    capabilities.update(SEMANTIC_QUERY_METHODS)
+    return capabilities
 
 
 # -----------------------------------------------------------------------------
@@ -217,17 +362,30 @@ def exception_to_diagnostic(
     start_line, start_col = 0, 0
     stop_line, stop_col = 0, 0
 
-    if exc.origin_start is not None:
-        start_file_path, start_line, start_col = get_src_info_from_token(
-            exc.origin_start
-        )
-        if exc.origin_stop is not None:
+    origin_start = getattr(exc, "origin_start", None)
+    origin_stop = getattr(exc, "origin_stop", None)
+    source_chunk = exc.source_chunk
+
+    if origin_start is not None:
+        start_file_path, start_line, start_col = get_src_info_from_token(origin_start)
+        if origin_stop is not None:
             stop_line, stop_col = (
-                exc.origin_stop.line,
-                exc.origin_stop.column + len(exc.origin_stop.text),
+                origin_stop.line,
+                origin_stop.column + len(origin_stop.text),
             )
         else:
             stop_line, stop_col = start_line + 1, 0
+    elif source_chunk is not None:
+        try:
+            loc = source_chunk.loc.get()
+            start_line = loc.get_start_line()
+            start_col = loc.get_start_col()
+            stop_line = loc.get_end_line()
+            stop_col = loc.get_end_col()
+            src_path = source_chunk.get_path()
+            start_file_path = None if not src_path or src_path == "None" else src_path
+        except Exception:
+            pass
 
     # Convert from 1-indexed (ANTLR) to 0-indexed (LSP)
     start_line = max(start_line - 1, 0)
@@ -238,6 +396,32 @@ def exception_to_diagnostic(
         Path(start_file_path) if start_file_path and start_file_path != "None" else None
     )
 
+    deprecated_symbol_match = re.match(r"'([^']+)' is deprecated", exc.message)
+    deprecated_symbol = (
+        deprecated_symbol_match.group(1) if deprecated_symbol_match else None
+    )
+    if deprecated_symbol is not None and source_chunk is not None:
+        try:
+            found_at = source_chunk.get_text().find(deprecated_symbol)
+            if found_at >= 0:
+                start_col += found_at
+                stop_line = start_line
+                stop_col = start_col + len(deprecated_symbol)
+        except Exception:
+            pass
+    elif file_path is not None and deprecated_symbol is not None:
+        try:
+            lines = file_path.read_text().splitlines()
+            if start_line < len(lines):
+                line_text = lines[start_line]
+                found_at = line_text.find(deprecated_symbol, start_col)
+                if found_at >= 0:
+                    start_col = found_at
+                    stop_line = start_line
+                    stop_col = found_at + len(deprecated_symbol)
+        except Exception:
+            pass
+
     return file_path, lsp.Diagnostic(
         range=lsp.Range(
             start=lsp.Position(line=start_line, character=start_col),
@@ -245,9 +429,77 @@ def exception_to_diagnostic(
         ),
         message=exc.message,
         severity=severity,
-        code=exc.code,
+        code=getattr(exc, "code", None),
         source=TOOL_DISPLAY,
     )
+
+
+def _dsl_rich_exception_to_diagnostic(
+    exc: DslRichException,
+    source_text: str | None = None,
+    severity: lsp.DiagnosticSeverity = lsp.DiagnosticSeverity.Error,
+) -> tuple[Path | None, lsp.Diagnostic] | None:
+    source_chunk = exc.source_chunk
+    if source_chunk is None:
+        return None
+
+    loc = source_chunk.loc.get()
+
+    symbol_match = re.search(r"Symbol `([^`]+)`", exc.message)
+    if symbol_match is None:
+        symbol_match = re.match(r"`([^`]+)`", exc.message)
+    symbol_name = symbol_match.group(1) if symbol_match else None
+
+    range_ = file_location_to_lsp_range(loc)
+    if symbol_name is not None and source_text is not None:
+        line_no = range_.start.line
+        lines = source_text.splitlines()
+        if line_no < len(lines):
+            line_text = lines[line_no]
+            found_at = line_text.find(symbol_name, range_.start.character)
+            if found_at >= 0:
+                range_ = lsp.Range(
+                    start=lsp.Position(line=line_no, character=found_at),
+                    end=lsp.Position(
+                        line=line_no, character=found_at + len(symbol_name)
+                    ),
+                )
+
+    file_path = exc.file_path
+    resolved_path = file_path.resolve() if isinstance(file_path, Path) else file_path
+    return resolved_path, lsp.Diagnostic(
+        range=range_,
+        message=exc.message,
+        severity=severity,
+        source=TOOL_DISPLAY,
+    )
+
+
+def _pathless_deprecation_diagnostic_matches_source(
+    diag: lsp.Diagnostic,
+    *,
+    source_text: str,
+) -> bool:
+    deprecated_symbol_match = re.match(r"'([^']+)' is deprecated", diag.message)
+    if deprecated_symbol_match is None:
+        return True
+
+    deprecated_symbol = deprecated_symbol_match.group(1)
+    lines = source_text.splitlines()
+    line_idx = diag.range.start.line
+    if line_idx < 0 or line_idx >= len(lines):
+        return False
+
+    line_text = lines[line_idx]
+    start = diag.range.start.character
+    end = diag.range.end.character
+    if (
+        0 <= start <= end <= len(line_text)
+        and line_text[start:end] == deprecated_symbol
+    ):
+        return True
+
+    return deprecated_symbol in line_text
 
 
 def _find_diagnostics_for_exception(
@@ -310,6 +562,98 @@ def _find_diagnostics_for_exception(
                 continue
     except Exception:
         pass
+
+    return diagnostics
+
+
+def _find_diagnostics_for_unresolved_type_references(
+    exc: UnresolvedTypeReferencesError,
+    build_result: BuildFileResult | None,
+    source_text: str,
+) -> list[lsp.Diagnostic]:
+    """Map unresolved linker refs back to source locations when possible."""
+    if build_result is None:
+        return []
+
+    diagnostics: list[lsp.Diagnostic] = []
+
+    for _type_node, unresolved_type_ref in exc.unresolved_type_references:
+        try:
+            unresolved_ident = fbrk.TypeGraph.get_type_reference_identifier(
+                type_reference=unresolved_type_ref
+            )
+        except Exception:
+            unresolved_ident = None
+
+        matched = False
+        for (
+            type_ref,
+            import_ref,
+            source_node,
+            traceback_stack,
+        ) in build_result.state.external_type_refs:
+            try:
+                same_ref = type_ref.node().is_same(other=unresolved_type_ref.node())
+            except Exception:
+                same_ref = False
+
+            try:
+                candidate_ident = fbrk.TypeGraph.get_type_reference_identifier(
+                    type_reference=type_ref
+                )
+            except Exception:
+                candidate_ident = None
+
+            if not same_ref and candidate_ident != unresolved_ident:
+                continue
+
+            matched = True
+            if import_ref is None:
+                symbol_name = candidate_ident or unresolved_ident or "<unknown>"
+                rich_exc = DslRichException(
+                    f"Symbol `{symbol_name}` is not defined in this scope",
+                    original=DslUndefinedSymbolError(),
+                    source_node=source_node,
+                    traceback=traceback_stack,
+                )
+            elif import_ref.path is None:
+                rich_exc = DslRichException(
+                    (
+                        "Standard library import "
+                        f"`{import_ref.name}` could not be resolved"
+                    ),
+                    original=DslImportError(),
+                    source_node=source_node,
+                    traceback=traceback_stack,
+                )
+            else:
+                rich_exc = DslRichException(
+                    f"Unable to resolve import `{import_ref.path}`",
+                    original=DslImportError(),
+                    source_node=source_node,
+                    traceback=traceback_stack,
+                )
+
+            rich_diag = _dsl_rich_exception_to_diagnostic(
+                rich_exc, source_text=source_text
+            )
+            if rich_diag is not None:
+                _exc_path, diag = rich_diag
+                diagnostics.append(diag)
+            break
+
+        if not matched:
+            diagnostics.append(
+                lsp.Diagnostic(
+                    range=lsp.Range(
+                        start=lsp.Position(line=0, character=0),
+                        end=lsp.Position(line=0, character=0),
+                    ),
+                    message=str(exc),
+                    severity=lsp.DiagnosticSeverity.Warning,
+                    source=TOOL_DISPLAY,
+                )
+            )
 
     return diagnostics
 
@@ -446,7 +790,15 @@ def find_node_at_position(
 # -----------------------------------------------------------------------------
 
 
-def build_document(uri: str, source: str) -> DocumentState:
+def build_document(
+    uri: str,
+    source: str,
+    *,
+    source_path: Path | None = None,
+    source_overrides: Mapping[Path, str] | None = None,
+    warm_base=None,
+    reuse_warm_base_graph: bool = False,
+) -> DocumentState:
     """
     Build a document and update its state.
 
@@ -455,99 +807,116 @@ def build_document(uri: str, source: str) -> DocumentState:
     2. Extracts diagnostics (errors/warnings)
     3. Indexes AST nodes for hover/definition
 
-    If the build fails, we preserve the last successful build result
-    so that completions/hover can still work while the user is typing.
-
     Returns the updated DocumentState.
     """
     state = get_document_state(uri)
+    state.reset_graph()
     state.version += 1
     state.diagnostics = []
     state.last_error = None
+    state.query_capabilities = set(BASE_QUERY_CAPABILITIES)
+
+    current_build_result: BuildFileResult | None = None
+    current_ast_nodes: list[ASTNodeLocation] = []
+    invalid_ranges: list[lsp.Range] = []
+    build_started_at = time.perf_counter()
+    phase_timings_ms: dict[str, float] = {}
+    profile_counts: dict[str, int] = {}
+    file_path = source_path or get_file_path(uri)
+    document_path = file_path.resolve()
+
+    def finish_phase(name: str, started_at: float) -> None:
+        phase_timings_ms[name] = round((time.perf_counter() - started_at) * 1000, 1)
 
     # Create a NEW graph for this build attempt
-    # Don't destroy the old graph yet - we might need it if the build fails
-    new_graph_view = graph.GraphView.create()
-    new_type_graph = fbrk.TypeGraph.create(g=new_graph_view)
+    graph_prep_started_at = time.perf_counter()
+    borrowed_warm_base_graph = False
+    current_file_is_preloaded = (
+        warm_base is not None and document_path in warm_base.prelinked_module_type_ids
+    )
+    if (
+        warm_base is not None
+        and reuse_warm_base_graph
+        and not current_file_is_preloaded
+    ):
+        new_graph_view, new_type_graph = warm_base.borrow_forked_graph()
+        borrowed_warm_base_graph = True
+        linked_modules_seed = warm_base.create_linked_modules_seed(new_type_graph)
+    elif warm_base is not None and not current_file_is_preloaded:
+        new_graph_view, new_type_graph = warm_base.create_working_graph()
+        linked_modules_seed = warm_base.create_linked_modules_seed(new_type_graph)
+    else:
+        new_graph_view = graph.GraphView.create()
+        new_type_graph = fbrk.TypeGraph.create(g=new_graph_view)
+        linked_modules_seed = None
+    finish_phase("graph_prep", graph_prep_started_at)
     new_stdlib = StdlibRegistry(new_type_graph)
     g, tg, stdlib = new_graph_view, new_type_graph, new_stdlib
 
-    file_path = get_file_path(uri)
-    document_path = file_path.resolve()
+    state.resolved_dependency_paths = set()
+    state.compiled_file_timings_ms = {}
 
-    # Clear ALL caches to ensure clean rebuild
-    # This prevents "Child not found" errors from stale graph references
-    from faebryk.core.node import TypeNodeBoundTG
-
-    logger.info(f"=== Starting build for {document_path} ===")
-    logger.info(f"State version before: {state.version - 1}")
-    logger.info(f"_seen_types count: {len(fabll.Node._seen_types)}")
-    logger.info(f"__TYPE_NODE_MAP__ count: {len(TypeNodeBoundTG.__TYPE_NODE_MAP__)}")
-
-    # Clear TypeNodeBoundTG map (maps graph nodes to TypeNodeBoundTG)
-    TypeNodeBoundTG.__TYPE_NODE_MAP__.clear()
-    logger.info("Cleared __TYPE_NODE_MAP__")
-
-    # Clear _type_cache for ALL Node subclasses (not just registered ones)
-    # This is critical because library types may have cached graph nodes
-    cache_count = 0
-
-    def clear_all_node_caches(cls: type) -> None:
-        nonlocal cache_count
-        if hasattr(cls, "_type_cache") and cls._type_cache:
-            count = len(cls._type_cache)
-            if count > 0:
-                cache_count += count
-            cls._type_cache.clear()
-        for subclass in cls.__subclasses__():
-            clear_all_node_caches(subclass)
-
-    clear_all_node_caches(fabll.Node)
-    logger.info(f"Cleared {cache_count} _type_cache entries")
-
-    # Clear _seen_types for types from this file (so they get re-registered)
-    # Note: type identifiers use :: separator, e.g. "/path/file.ato::ModuleName"
-    file_prefix = str(document_path) + "::"
-    types_to_clear = [
-        type_id for type_id in fabll.Node._seen_types if type_id.startswith(file_prefix)
-    ]
-    logger.info(f"Types to clear from _seen_types: {types_to_clear}")
-    for type_id in types_to_clear:
-        del fabll.Node._seen_types[type_id]
-        logger.debug(f"Cleared cached type: {type_id}")
+    cache_clear_started_at = time.perf_counter()
+    cache_count, file_type_count = clear_type_caches_for_file(document_path)
+    finish_phase("cache_clear", cache_clear_started_at)
+    profile_counts["cache_entries_cleared"] = cache_count
+    profile_counts["file_types_cleared"] = file_type_count
 
     # Collect diagnostics during build
     diagnostics: list[lsp.Diagnostic] = []
 
     build_succeeded = False
     linking_succeeded = False
-    with DowngradedExceptionCollector(UserException) as collector:
+    with DowngradedExceptionCollector(
+        UserException, suppress_logging=True
+    ) as collector:
         try:
-            # Build the source
-            logger.info("Starting build_source...")
-            result = build_source(
+            parse_started_at = time.perf_counter()
+            parse_result = parse_text_as_file_recovering(source, src_path=document_path)
+            finish_phase("parse", parse_started_at)
+            syntax_diagnostics = [
+                exception_to_diagnostic(exc)[1] for exc in parse_result.errors
+            ]
+            diagnostics.extend(syntax_diagnostics)
+            invalid_ranges.extend(
+                _diagnostic_to_invalid_range(diagnostic)
+                for diagnostic in syntax_diagnostics
+            )
+            profile_counts["syntax_errors"] = len(parse_result.errors)
+            logger.debug("Starting recovered build_from_ctx")
+            build_started_phase_at = time.perf_counter()
+            result = _build_from_ctx(
                 g=g,
                 tg=tg,
-                source=source,
                 import_path=str(document_path),
+                root_ctx=parse_result.tree,
+                file_path=document_path,
             )
-            logger.info(
-                f"build_source completed. type_roots: "
-                f"{list(result.state.type_roots.keys())}"
+            finish_phase("build", build_started_phase_at)
+            logger.debug(
+                "Recovered build completed. type_roots=%s syntax_errors=%s",
+                list(result.state.type_roots.keys()),
+                len(parse_result.errors),
             )
-            state.build_result = result
+            current_build_result = result
             build_succeeded = True
+            profile_counts["type_roots"] = len(result.state.type_roots)
 
             # Index AST nodes for hover/go-to-definition
-            state.ast_nodes = index_ast_nodes(result.ast_root)
+            current_ast_nodes = index_ast_nodes(result.ast_root)
+            profile_counts["ast_nodes"] = len(current_ast_nodes)
 
             # Try to link imports (may fail if dependencies missing)
+            link_started_at = time.perf_counter()
             try:
                 # Get config for linker
                 from atopile.config import config
 
                 try:
-                    config.apply_options(entry=None, working_dir=file_path.parent)
+                    project_root = (
+                        _infer_lsp_project_root(file_path) or file_path.parent
+                    )
+                    config.apply_options(entry=None, working_dir=project_root)
                 except Exception:
                     pass
 
@@ -555,25 +924,158 @@ def build_document(uri: str, source: str) -> DocumentState:
                     config_obj=config,
                     stdlib=stdlib,
                     tg=tg,
+                    source_overrides=source_overrides,
+                    linked_modules_seed=linked_modules_seed,
                 )
-                linker.link_imports(g, result.state)
+                try:
+                    build_stage_2(
+                        g=g,
+                        tg=tg,
+                        linker=linker,
+                        result=result,
+                        validate=False,
+                    )
+                except Exception:
+                    # Keep linker diagnostics, but still try deferred execution.
+                    # This lets inheritance/retypes complete for editor features
+                    # even when unrelated unresolved symbols remain in the file.
+                    from atopile.compiler.deferred_executor import DeferredExecutor
+
+                    try:
+                        DeferredExecutor(
+                            g=g,
+                            tg=tg,
+                            state=result.state,
+                            visitor=result.visitor,
+                            stdlib=linker._stdlib,
+                            file_imports=linker,
+                        ).execute()
+                    except Exception:
+                        pass
+                    raise
+                state.resolved_dependency_paths = set(linker._linked_modules)
                 linking_succeeded = True
             except Exception as link_error:
-                # Linking failures are warnings, not errors
-                diagnostics.append(
-                    lsp.Diagnostic(
-                        range=lsp.Range(
-                            start=lsp.Position(line=0, character=0),
-                            end=lsp.Position(line=0, character=0),
-                        ),
-                        message=f"Import resolution: {link_error}",
-                        severity=lsp.DiagnosticSeverity.Warning,
-                        source=TOOL_DISPLAY,
+                if isinstance(link_error, UnresolvedTypeReferencesError):
+                    unresolved_diags = _find_diagnostics_for_unresolved_type_references(
+                        link_error,
+                        build_result=result,
+                        source_text=source,
                     )
-                )
+                    if unresolved_diags:
+                        diagnostics.extend(unresolved_diags)
+                    else:
+                        diagnostics.append(
+                            lsp.Diagnostic(
+                                range=lsp.Range(
+                                    start=lsp.Position(line=0, character=0),
+                                    end=lsp.Position(line=0, character=0),
+                                ),
+                                message=f"Import resolution: {link_error}",
+                                severity=lsp.DiagnosticSeverity.Warning,
+                                source=TOOL_DISPLAY,
+                            )
+                        )
+                elif isinstance(link_error, DslRichException):
+                    rich_diag = _dsl_rich_exception_to_diagnostic(
+                        link_error, source_text=source
+                    )
+                    if rich_diag is not None:
+                        exc_path, diag = rich_diag
+                        if exc_path is None or exc_path.resolve() == document_path:
+                            diagnostics.append(diag)
+                        else:
+                            diagnostics.append(
+                                lsp.Diagnostic(
+                                    range=lsp.Range(
+                                        start=lsp.Position(line=0, character=0),
+                                        end=lsp.Position(line=0, character=0),
+                                    ),
+                                    message=link_error.message,
+                                    severity=lsp.DiagnosticSeverity.Error,
+                                    source=TOOL_DISPLAY,
+                                )
+                            )
+                    else:
+                        diagnostics.append(
+                            lsp.Diagnostic(
+                                range=lsp.Range(
+                                    start=lsp.Position(line=0, character=0),
+                                    end=lsp.Position(line=0, character=0),
+                                ),
+                                message=link_error.message,
+                                severity=lsp.DiagnosticSeverity.Error,
+                                source=TOOL_DISPLAY,
+                            )
+                        )
+                elif isinstance(link_error, BaseExceptionGroup):
+                    handled_rich_error = False
+                    for leaf in iter_leaf_exceptions(link_error):
+                        if isinstance(leaf, UnresolvedTypeReferencesError):
+                            unresolved_diags = (
+                                _find_diagnostics_for_unresolved_type_references(
+                                    leaf,
+                                    build_result=result,
+                                    source_text=source,
+                                )
+                            )
+                            if unresolved_diags:
+                                diagnostics.extend(unresolved_diags)
+                                handled_rich_error = True
+                            continue
+
+                        if isinstance(leaf, DslRichException):
+                            handled_rich_error = True
+                            rich_diag = _dsl_rich_exception_to_diagnostic(
+                                leaf, source_text=source
+                            )
+                            if rich_diag is not None:
+                                exc_path, diag = rich_diag
+                                if (
+                                    exc_path is None
+                                    or exc_path.resolve() == document_path
+                                ):
+                                    diagnostics.append(diag)
+                    if not handled_rich_error:
+                        diagnostics.append(
+                            lsp.Diagnostic(
+                                range=lsp.Range(
+                                    start=lsp.Position(line=0, character=0),
+                                    end=lsp.Position(line=0, character=0),
+                                ),
+                                message=f"Import resolution: {link_error}",
+                                severity=lsp.DiagnosticSeverity.Warning,
+                                source=TOOL_DISPLAY,
+                            )
+                        )
+                else:
+                    # Linking failures are warnings when they are not
+                    # source-located DSL errors.
+                    diagnostics.append(
+                        lsp.Diagnostic(
+                            range=lsp.Range(
+                                start=lsp.Position(line=0, character=0),
+                                end=lsp.Position(line=0, character=0),
+                            ),
+                            message=f"Import resolution: {link_error}",
+                            severity=lsp.DiagnosticSeverity.Warning,
+                            source=TOOL_DISPLAY,
+                        )
+                    )
+            finally:
+                finish_phase("link", link_started_at)
 
         except* UserException as exc_group:
             for exc in iter_leaf_exceptions(exc_group):
+                if isinstance(exc, DslRichException):
+                    rich_diag = _dsl_rich_exception_to_diagnostic(
+                        exc, source_text=source
+                    )
+                    if rich_diag is not None:
+                        exc_path, diag = rich_diag
+                        if exc_path is None or exc_path.resolve() == document_path:
+                            diagnostics.append(diag)
+                        continue
                 exc_path, diag = exception_to_diagnostic(exc)
                 if exc_path is None or exc_path.resolve() == document_path:
                     diagnostics.append(diag)
@@ -583,6 +1085,26 @@ def build_document(uri: str, source: str) -> DocumentState:
             for exc in iter_leaf_exceptions(exc_group):
                 state.last_error = exc
                 logger.exception(f"Build error for {uri}: {exc}")
+
+                if isinstance(exc, UnresolvedTypeReferencesError):
+                    unresolved_diags = _find_diagnostics_for_unresolved_type_references(
+                        exc,
+                        build_result=result,
+                        source_text=source,
+                    )
+                    if unresolved_diags:
+                        diagnostics.extend(unresolved_diags)
+                        continue
+
+                if isinstance(exc, DslRichException):
+                    rich_diag = _dsl_rich_exception_to_diagnostic(
+                        exc, source_text=source
+                    )
+                    if rich_diag is not None:
+                        exc_path, diag = rich_diag
+                        if exc_path is None or exc_path.resolve() == document_path:
+                            diagnostics.append(diag)
+                            continue
 
                 # Try to find source locations from the graph for unhandled node types
                 node_diagnostics = _find_diagnostics_for_exception(exc, g, tg, str(exc))
@@ -609,110 +1131,90 @@ def build_document(uri: str, source: str) -> DocumentState:
                 exc_path, diag = exception_to_diagnostic(
                     error, severity=lsp.DiagnosticSeverity.Warning
                 )
+                if (
+                    exc_path is None
+                    and not _pathless_deprecation_diagnostic_matches_source(
+                        diag, source_text=source
+                    )
+                ):
+                    continue
                 if exc_path is None or exc_path.resolve() == document_path:
                     diagnostics.append(diag)
 
     # If build AND linking succeeded, validate field references against typegraph
     # Only validate when linking succeeded - otherwise external types aren't resolved
     # and we'd get false positives for valid references to imported types
-    logger.info(
-        f"Build status: build_succeeded={build_succeeded}, "
-        f"linking_succeeded={linking_succeeded}, "
-        f"build_result={'yes' if state.build_result else 'no'}"
+    logger.debug(
+        "Build status: build_succeeded=%s linking_succeeded=%s previous_build=%s",
+        build_succeeded,
+        linking_succeeded,
+        "yes" if state.build_result else "no",
     )
-    if build_succeeded and linking_succeeded and state.build_result is not None:
+    if build_succeeded and linking_succeeded and current_build_result is not None:
+        field_validation_started_at = time.perf_counter()
         field_ref_diagnostics = _validate_field_references(
-            g=g, tg=tg, build_result=state.build_result, uri=uri
+            g=g, tg=tg, build_result=current_build_result, uri=uri
         )
+        finish_phase("field_validation", field_validation_started_at)
         diagnostics.extend(field_ref_diagnostics)
+        profile_counts["field_ref_diagnostics"] = len(field_ref_diagnostics)
+    phase_timings_ms["total"] = round(
+        (time.perf_counter() - build_started_at) * 1000, 1
+    )
+    logger.info(
+        "Built %s: diagnostics=%s deps=%s",
+        document_path,
+        len(diagnostics),
+        len(state.resolved_dependency_paths),
+    )
 
-        # Collect all ERC-related diagnostics
-        new_erc_diagnostics: list[lsp.Diagnostic] = []
-        erc_check_succeeded = True
-
-        # Instantiate type roots to create instance graph for ERC checking
-        # This creates EdgeInterfaceConnections that we can check
-        # TypeGraphInstantiationError is thrown for invalid connections
-        try:
-            for type_name, type_root in state.build_result.state.type_roots.items():
-                try:
-                    tg.instantiate_node(type_node=type_root, attributes={})
-                    logger.debug(f"Instantiated type root: {type_name}")
-                except fbrk.TypeGraphInstantiationError as inst_err:
-                    # This error contains the failing MakeLink node with source info
-                    logger.info(f"Instantiation error for {type_name}: {inst_err}")
-                    diag = _instantiation_error_to_diagnostic(inst_err, document_path)
-                    if diag:
-                        new_erc_diagnostics.append(diag)
-                except Exception as inst_err:
-                    # Other instantiation errors mean ERC check is incomplete
-                    # Log full details to debug why it's not TypeGraphInstantiationError
-                    import traceback
-
-                    logger.info(
-                        f"Other instantiation error for {type_name}: "
-                        f"type={type(inst_err).__module__}.{type(inst_err).__name__}, "
-                        f"msg={inst_err}"
-                    )
-                    logger.info(f"Full traceback:\n{traceback.format_exc()}")
-                    erc_check_succeeded = False
-        except Exception as e:
-            logger.debug(f"Error instantiating type roots: {e}")
-            erc_check_succeeded = False
-
-        # Run ERC checks for invalid interface connections
-        # Now we have instance graph with EdgeInterfaceConnections
-        logger.info(f"Running ERC checks for {document_path}")
-        try:
-            erc_check_diagnostics = _run_erc_checks_for_lsp(
-                tg=tg, document_path=document_path
-            )
-            logger.info(f"ERC check diagnostics found: {len(erc_check_diagnostics)}")
-            for d in erc_check_diagnostics:
-                logger.info(f"  ERC: {d.message} at line {d.range.start.line}")
-            new_erc_diagnostics.extend(erc_check_diagnostics)
-        except Exception as e:
-            logger.warning(f"ERC check failed: {e}", exc_info=True)
-            erc_check_succeeded = False
-
-        # Only update persisted ERC diagnostics if check succeeded
-        # Otherwise keep previous diagnostics
-        if erc_check_succeeded or new_erc_diagnostics:
-            state.erc_diagnostics = new_erc_diagnostics
-            logger.info(f"Updated ERC diagnostics: {len(state.erc_diagnostics)}")
-        else:
-            logger.info(
-                f"ERC check incomplete, keeping {len(state.erc_diagnostics)} "
-                "previous diagnostics"
-            )
-
-    # Always include persisted ERC diagnostics
-    logger.info(f"Including {len(state.erc_diagnostics)} persisted ERC diagnostics")
-    diagnostics.extend(state.erc_diagnostics)
-    logger.info(f"Total diagnostics to publish: {len(diagnostics)}")
-
-    # If the build succeeded, commit the new graph and discard the old one
     if build_succeeded:
-        # Destroy old graph if it exists
-        if state.graph_view is not None:
-            try:
-                state.graph_view.destroy()
-            except Exception:
-                pass
-        # Commit new graph
         state.graph_view = new_graph_view
         state.type_graph = new_type_graph
         state.stdlib = new_stdlib
+        state.build_result = current_build_result
+        state.ast_nodes = current_ast_nodes
+        state.query_capabilities = _compute_query_capabilities(
+            current_build_result,
+            current_ast_nodes,
+            state.type_graph,
+            state.graph_view,
+        )
     else:
-        # Build failed - discard the new graph and keep the old one
-        try:
-            new_graph_view.destroy()
-        except Exception:
-            pass
-        logger.debug(f"Build failed for {uri}, keeping previous state")
+        if not borrowed_warm_base_graph:
+            try:
+                new_graph_view.destroy()
+            except Exception:
+                pass
+        logger.debug("Build failed for %s with no partial semantic state", uri)
 
     state.diagnostics = diagnostics
+    state.invalid_ranges = invalid_ranges
+    state.phase_timings_ms = phase_timings_ms
+    state.profile_counts = profile_counts
+    if current_build_result is not None:
+        state.compiled_file_timings_ms = dict(
+            current_build_result.state.compiled_file_timings_ms
+        )
+    else:
+        state.compiled_file_timings_ms = {}
     return state
+
+
+def _infer_lsp_project_root(path: Path) -> Path | None:
+    """
+    Infer the owning project root for an LSP-opened file.
+
+    Files opened from ``<project>/.ato/modules/...`` should still resolve imports
+    against ``<project>`` rather than the dependency package's nested ``ato.yaml``.
+    """
+    resolved = path.resolve()
+
+    for candidate in (resolved, *resolved.parents):
+        if candidate.name == "modules" and candidate.parent.name == ".ato":
+            return candidate.parent.parent
+
+    return find_project_dir(resolved)
 
 
 def _validate_field_references(
@@ -864,131 +1366,6 @@ def _validate_field_references(
     return diagnostics
 
 
-def _instantiation_error_to_diagnostic(
-    error: fbrk.TypeGraphInstantiationError,
-    document_path: Path,
-) -> lsp.Diagnostic | None:
-    """
-    Convert a TypeGraphInstantiationError to an LSP diagnostic.
-
-    The error.node is the failing MakeLink node which should have source info.
-    """
-    try:
-        from atopile.compiler.ast_types import SourceChunk
-        from atopile.compiler.ast_visitor import AnyAtoBlock
-
-        # Get the failing node
-        failing_bound = error.node
-
-        # Try to get source chunk via EdgePointer
-        source_ref = fbrk.EdgePointer.get_pointed_node_by_identifier(
-            bound_node=failing_bound, identifier=AnyAtoBlock._source_identifier
-        )
-
-        if source_ref is None:
-            logger.debug("No source chunk pointer on failing node")
-            return None
-
-        # Wrap as SourceChunk
-        source_chunk = SourceChunk.bind_instance(source_ref)
-        loc = source_chunk.loc.get()
-        filepath_str = loc.filepath.get().get_single()
-        source_file = Path(filepath_str)
-
-        # Only report for current document
-        if source_file.resolve() != document_path:
-            return None
-
-        # Build error message
-        message = f"Invalid connection: {error}"
-        if hasattr(error, "kind"):
-            message = f"Connection error ({error.kind}): {error}"
-
-        return lsp.Diagnostic(
-            range=lsp.Range(
-                start=lsp.Position(
-                    line=loc.get_start_line() - 1,
-                    character=loc.get_start_col(),
-                ),
-                end=lsp.Position(
-                    line=loc.get_end_line() - 1,
-                    character=loc.get_end_col(),
-                ),
-            ),
-            message=message,
-            severity=lsp.DiagnosticSeverity.Error,
-            source=TOOL_DISPLAY,
-        )
-    except Exception as e:
-        logger.debug(f"Error converting instantiation error to diagnostic: {e}")
-        return None
-
-
-def _run_erc_checks_for_lsp(
-    tg: fbrk.TypeGraph,
-    document_path: Path,
-) -> list[lsp.Diagnostic]:
-    """
-    Run ERC checks and return diagnostics for invalid interface connections.
-
-    Uses the shared find_interface_connection_errors() function from erc.py
-    to avoid duplicating the checking logic.
-
-    Returns diagnostics with source locations from the MakeLink nodes.
-    """
-    logger.info("_run_erc_checks_for_lsp called")
-    try:
-        from faebryk.libs.app.erc import find_interface_connection_errors
-    except ImportError as e:
-        logger.warning(f"Could not import ERC helpers: {e}")
-        return []
-
-    diagnostics: list[lsp.Diagnostic] = []
-
-    try:
-        # Use the shared function to find all interface connection errors
-        logger.info("Calling find_interface_connection_errors...")
-        errors = find_interface_connection_errors(tg)
-        logger.info(f"find_interface_connection_errors returned {len(errors)} errors")
-
-        for error in errors:
-            logger.info(f"Processing ERC error: {error.message}")
-            if error.source_chunk is None:
-                logger.info("  -> source_chunk is None, skipping")
-                continue
-
-            try:
-                loc = error.source_chunk.loc.get()
-                start_line = loc.get_start_line() - 1
-                start_col = loc.get_start_col()
-                end_line = loc.get_end_line() - 1
-                end_col = loc.get_end_col()
-                logger.info(
-                    f"  -> Range: ({start_line}:{start_col}) to ({end_line}:{end_col})"
-                )
-
-                # Note: LSP builds from source string so filepath may not be set
-                # All errors from this build are for the current document
-                diagnostics.append(
-                    lsp.Diagnostic(
-                        range=lsp.Range(
-                            start=lsp.Position(line=start_line, character=start_col),
-                            end=lsp.Position(line=end_line, character=end_col),
-                        ),
-                        message=error.message,
-                        severity=lsp.DiagnosticSeverity.Error,
-                        source=TOOL_DISPLAY,
-                    )
-                )
-            except Exception as e:
-                logger.info(f"  -> Error getting source location: {e}", exc_info=True)
-
-    except Exception as e:
-        logger.debug(f"ERC check error: {e}")
-
-    return diagnostics
-
-
 # -----------------------------------------------------------------------------
 # Completion Helpers
 # -----------------------------------------------------------------------------
@@ -1101,6 +1478,168 @@ def get_node_completions(node: fabll.Node) -> list[lsp.CompletionItem]:
     return completion_items
 
 
+def get_type_node_completions(
+    tg: fbrk.TypeGraph, type_node: graph.BoundNode
+) -> list[lsp.CompletionItem]:
+    """Extract completion items from a TypeGraph type node without instantiation."""
+    from atopile.model.module_introspection import _get_item_type, _is_user_facing_child
+
+    completion_items: list[lsp.CompletionItem] = []
+
+    try:
+        make_children = tg.collect_make_children(type_node=type_node)
+    except Exception as e:
+        logger.debug(f"Error extracting type-node completions: {e}")
+        return completion_items
+
+    for identifier, make_child in make_children:
+        if not identifier:
+            continue
+
+        base_name = identifier.split("[", 1)[0]
+        if not _is_user_facing_child(base_name):
+            continue
+
+        try:
+            type_ref = tg.get_make_child_type_reference(make_child=make_child)
+            resolved_type = fbrk.Linker.get_resolved_type(type_reference=type_ref)
+            if resolved_type is not None:
+                type_name = fbrk.TypeGraph.get_type_name(type_node=resolved_type)
+            else:
+                type_name = fbrk.TypeGraph.get_type_reference_identifier(
+                    type_reference=type_ref
+                )
+        except Exception:
+            resolved_type = None
+            type_name = "Unknown"
+
+        type_name_lower = type_name.lower()
+        if "pointer" in type_name_lower or "sequence" in type_name_lower:
+            continue
+
+        item_type = _get_item_type(tg, resolved_type, type_name)
+        if item_type is None:
+            continue
+
+        if item_type == "module":
+            kind = lsp.CompletionItemKind.Field
+            detail = f"Module: {type_name}"
+        elif item_type == "interface":
+            kind = lsp.CompletionItemKind.Interface
+            detail = f"Interface: {type_name}"
+        elif item_type == "parameter":
+            kind = lsp.CompletionItemKind.Unit
+            detail = "Parameter"
+        elif item_type == "component":
+            kind = lsp.CompletionItemKind.Class
+            detail = f"Component: {type_name}"
+        else:
+            continue
+
+        completion_items.append(
+            lsp.CompletionItem(
+                label=identifier,
+                kind=kind,
+                detail=detail,
+                documentation=lsp.MarkupContent(
+                    kind=lsp.MarkupKind.Markdown,
+                    value=f"**{identifier}**: {detail}",
+                ),
+            )
+        )
+
+    return completion_items
+
+
+def _resolve_make_child_type_node(
+    tg: fbrk.TypeGraph, type_node: graph.BoundNode, child_name: str
+) -> graph.BoundNode | None:
+    """Resolve a child name to its type node using make-child type references."""
+    try:
+        make_children = tg.collect_make_children(type_node=type_node)
+    except Exception:
+        return None
+
+    for identifier, make_child in make_children:
+        base_name = identifier.split("[", 1)[0]
+        if identifier != child_name and base_name != child_name:
+            continue
+        try:
+            type_ref = tg.get_make_child_type_reference(make_child=make_child)
+            resolved_type = fbrk.Linker.get_resolved_type(type_reference=type_ref)
+        except Exception:
+            resolved_type = None
+        if resolved_type is not None:
+            return resolved_type
+
+    return None
+
+
+def _resolve_dot_completion_node(
+    state: DocumentState, field_ref: str
+) -> fabll.Node | None:
+    parts = field_ref.split(".")
+    if not parts:
+        return None
+
+    root_name = parts[0].split("[")[0]
+    type_roots = state.build_result.state.type_roots
+    g, tg, _ = state.ensure_graph()
+
+    for type_name, type_node in type_roots.items():
+        path = parts[1:] if type_name == root_name else parts
+        if type_name != root_name:
+            children = tg.collect_make_children(type_node=type_node)
+            if not any(child_name == root_name for child_name, _ in children):
+                continue
+
+        base_instance = tg.instantiate_node(type_node=type_node, attributes={})
+        if not path:
+            return fabll.Node(instance=base_instance)
+
+        try:
+            ref = tg.ensure_child_reference(type_node=type_node, path=path)
+            resolved = tg.reference_resolve(reference_node=ref, base_node=base_instance)
+        except Exception:
+            continue
+
+        return fabll.Node(instance=resolved)
+
+    return None
+
+
+def _resolve_dot_completion_type_node(
+    state: DocumentState, field_ref: str
+) -> graph.BoundNode | None:
+    parts = [part.split("[", 1)[0] for part in field_ref.split(".") if part]
+    if not parts:
+        return None
+
+    root_name = parts[0]
+    type_roots = state.build_result.state.type_roots
+    _, tg, _ = state.ensure_graph()
+
+    for type_name, type_node in type_roots.items():
+        if type_name == root_name:
+            current_type = type_node
+            remaining = parts[1:]
+        else:
+            current_type = _resolve_make_child_type_node(tg, type_node, root_name)
+            if current_type is None:
+                continue
+            remaining = parts[1:]
+
+        for part in remaining:
+            current_type = _resolve_make_child_type_node(tg, current_type, part)
+            if current_type is None:
+                break
+
+        if current_type is not None:
+            return current_type
+
+    return None
+
+
 def get_stdlib_types() -> list[type[fabll.Node]]:
     """Get all stdlib types available for import."""
     symbols = vars(F).values()
@@ -1151,7 +1690,7 @@ def get_importable_paths(uri: str) -> list[Path]:
     file_path = get_file_path(uri)
     root = file_path.parent
 
-    prj_root = find_project_dir(root)
+    prj_root = _infer_lsp_project_root(file_path)
     if prj_root:
         root = prj_root
 
@@ -1163,13 +1702,130 @@ def get_importable_paths(uri: str) -> list[Path]:
     ]
 
     if prj_root:
-        # Remove .ato/modules prefix
+        # Remove .ato/modules prefix; exclude parts/ and local/ paths in packages
         ato_files = [
             path if path.parts[:2] != (".ato", "modules") else Path(*path.parts[2:])
             for path in ato_files
+            if path.parts[:2] != (".ato", "modules")
+            or ("parts" not in path.parts[2:] and path.parts[2:3] != ("local",))
         ]
 
     return ato_files
+
+
+def _resolve_import_target_path(uri: str, raw_path: str) -> Path | None:
+    from atopile.compiler.build import SearchPathResolver
+    from atopile.config import config
+
+    current_file_path = get_file_path(uri)
+    project_dir = _infer_lsp_project_root(current_file_path)
+
+    try:
+        if project_dir is not None:
+            config.apply_options(entry=None, working_dir=project_dir)
+    except Exception:
+        pass
+
+    resolver = SearchPathResolver(config, extra_search_paths=[])
+    try:
+        return resolver.resolve(raw_path, base_file=current_file_path)
+    except Exception:
+        return None
+
+
+def _get_types_from_import_target(
+    uri: str, line_prefix: str
+) -> list[lsp.CompletionItem]:
+    match = re.search(
+        r'from\s+"(?P<path>[^"]+)"\s+import(?:\s+[\w,\s]*)?$',
+        line_prefix,
+    )
+    if not match:
+        return []
+
+    target_file = _resolve_import_target_path(uri, match.group("path"))
+    if target_file is None:
+        return []
+
+    try:
+        source = target_file.read_text()
+    except Exception:
+        return []
+
+    items: list[lsp.CompletionItem] = []
+    for line in source.splitlines():
+        stripped = line.strip()
+        type_match = re.match(
+            r"^(module|interface|component)\s+([A-Za-z_][A-Za-z0-9_]*)"
+            r"(?:\s+from\s+[A-Za-z_][A-Za-z0-9_]*)?\s*:",
+            stripped,
+        )
+        if not type_match:
+            continue
+
+        kind_name, type_name = type_match.groups()
+        if kind_name == "interface":
+            kind = lsp.CompletionItemKind.Interface
+        elif kind_name == "component":
+            kind = lsp.CompletionItemKind.Class
+        else:
+            kind = lsp.CompletionItemKind.Field
+
+        items.append(
+            lsp.CompletionItem(
+                label=type_name,
+                kind=kind,
+                detail=f'Imported from "{match.group("path")}"',
+            )
+        )
+
+    return items
+
+
+def _get_available_new_symbol_completions(
+    uri: str, source: str, state: DocumentState
+) -> list[lsp.CompletionItem]:
+    items_by_label: dict[str, lsp.CompletionItem] = {}
+
+    if state.build_result is not None:
+        for name in state.build_result.state.type_roots:
+            items_by_label[name] = lsp.CompletionItem(
+                label=name,
+                kind=lsp.CompletionItemKind.Class,
+                detail="Local type",
+            )
+
+    for line in source.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        import_match = re.match(r"^import\s+(.+)$", stripped)
+        if import_match:
+            for imported_name in import_match.group(1).split(","):
+                type_name = imported_name.strip()
+                if not type_name:
+                    continue
+                node_type = _find_stdlib_type(type_name)
+                if node_type is not None:
+                    items_by_label[type_name] = node_type_to_completion_item(node_type)
+            continue
+
+        from_match = re.match(r'^from\s+"([^"]+)"\s+import\s+(.+)$', stripped)
+        if from_match:
+            import_path, imported_names = from_match.groups()
+            target_items = {
+                item.label: item
+                for item in _get_types_from_import_target(
+                    uri, f'from "{import_path}" import {imported_names}'
+                )
+            }
+            for imported_name in imported_names.split(","):
+                type_name = imported_name.strip()
+                if type_name and type_name in target_items:
+                    items_by_label[type_name] = target_items[type_name]
+
+    return sorted(items_by_label.values(), key=lambda item: item.label)
 
 
 # -----------------------------------------------------------------------------
@@ -1181,6 +1837,7 @@ def get_importable_paths(uri: str) -> list[Path]:
 def on_initialize(params: lsp.InitializeParams) -> None:
     """Handle LSP initialization."""
     logger.info(f"LSP server initializing for workspace: {params.root_uri}")
+    BROKER.initialize(params.root_uri)
 
 
 @LSP_SERVER.feature(lsp.TEXT_DOCUMENT_DID_OPEN)
@@ -1189,10 +1846,7 @@ def on_document_did_open(params: lsp.DidOpenTextDocumentParams) -> None:
     uri = params.text_document.uri
     text = params.text_document.text
 
-    state = build_document(uri, text)
-    LSP_SERVER.text_document_publish_diagnostics(
-        lsp.PublishDiagnosticsParams(uri=uri, diagnostics=state.diagnostics)
-    )
+    BROKER.open_or_update(uri, text, params.text_document.version)
 
 
 @LSP_SERVER.feature(lsp.TEXT_DOCUMENT_DID_CHANGE)
@@ -1201,10 +1855,7 @@ def on_document_did_change(params: lsp.DidChangeTextDocumentParams) -> None:
     uri = params.text_document.uri
     document = LSP_SERVER.workspace.get_text_document(uri)
 
-    state = build_document(uri, document.source)
-    LSP_SERVER.text_document_publish_diagnostics(
-        lsp.PublishDiagnosticsParams(uri=uri, diagnostics=state.diagnostics)
-    )
+    BROKER.open_or_update(uri, document.source, params.text_document.version)
 
 
 @LSP_SERVER.feature(lsp.TEXT_DOCUMENT_DID_SAVE)
@@ -1213,10 +1864,9 @@ def on_document_did_save(params: lsp.DidSaveTextDocumentParams) -> None:
     uri = params.text_document.uri
     document = LSP_SERVER.workspace.get_text_document(uri)
 
-    state = build_document(uri, document.source)
-    LSP_SERVER.text_document_publish_diagnostics(
-        lsp.PublishDiagnosticsParams(uri=uri, diagnostics=state.diagnostics)
-    )
+    broker_doc = BROKER.get_document(uri)
+    version = broker_doc.version if broker_doc is not None else 0
+    BROKER.open_or_update(uri, document.source, version)
 
 
 @LSP_SERVER.feature(lsp.TEXT_DOCUMENT_DID_CLOSE)
@@ -1234,6 +1884,7 @@ def on_document_did_close(params: lsp.DidCloseTextDocumentParams) -> None:
         state.reset_graph()
         del DOCUMENT_STATES[uri]
         logger.debug(f"Cleaned up state for closed document: {uri}")
+    BROKER.close(uri)
 
 
 @LSP_SERVER.feature(
@@ -1244,12 +1895,18 @@ def on_document_did_close(params: lsp.DidCloseTextDocumentParams) -> None:
         workspace_diagnostics=False,
     ),
 )
-def on_document_diagnostic(params: lsp.DocumentDiagnosticParams) -> None:
+def on_document_diagnostic(
+    params: lsp.DocumentDiagnosticParams,
+) -> lsp.RelatedFullDocumentDiagnosticReport:
     """Handle diagnostic request."""
     uri = params.text_document.uri
-    state = get_document_state(uri)
-    LSP_SERVER.text_document_publish_diagnostics(
-        lsp.PublishDiagnosticsParams(uri=uri, diagnostics=state.diagnostics)
+    if _broker_manages_document(uri):
+        state = BROKER.compile_document(uri)
+    else:
+        state = get_document_state(uri)
+    return lsp.RelatedFullDocumentDiagnosticReport(
+        items=state.diagnostics,
+        related_documents=None,
     )
 
 
@@ -1262,6 +1919,22 @@ def on_document_diagnostic(params: lsp.DocumentDiagnosticParams) -> None:
 )
 def on_document_completion(params: lsp.CompletionParams) -> lsp.CompletionList | None:
     """Handle completion request."""
+    if _broker_manages_document(params.text_document.uri):
+        return _broker_query(
+            params.text_document.uri,
+            "completion",
+            {
+                "line": params.position.line,
+                "character": params.position.character,
+            },
+        )
+    return _document_completion_impl(params)
+
+
+def _document_completion_impl(
+    params: lsp.CompletionParams,
+) -> lsp.CompletionList | None:
+    """Completion implementation that operates on the local in-process state."""
     try:
         uri = params.text_document.uri
         document = LSP_SERVER.workspace.get_text_document(uri)
@@ -1274,99 +1947,67 @@ def on_document_completion(params: lsp.CompletionParams) -> lsp.CompletionList |
         char_before = line[: params.position.character]
         stripped = char_before.rstrip()
 
-        # Dot completion: "resistor."
-        if char_before.endswith("."):
-            field_ref = extract_field_reference_before_dot(
-                line, params.position.character
-            )
-            if not field_ref:
-                return None
+        # Dot completion: "resistor." or partial member like "resistor.vo"
+        dot_match = re.search(
+            r"(?P<field>[A-Za-z0-9_\[\]]+(?:\.[A-Za-z0-9_\[\]]+)*)\.(?P<prefix>[A-Za-z_][A-Za-z0-9_]*)?$",
+            char_before,
+        )
+        if dot_match:
+            field_ref = dot_match.group("field")
+            member_prefix = dot_match.group("prefix") or ""
 
             state = get_document_state(uri)
             if state.build_result is None:
                 return None
 
-            # Try to find the node for this field reference
-            # For now, look in type_roots for the first part
-            parts = field_ref.split(".")
-            if not parts:
-                return None
-
-            # Find the root symbol
-            root_name = parts[0]
-            # Handle array indexing
-            if "[" in root_name:
-                root_name = root_name.split("[")[0]
-
-            type_roots = state.build_result.state.type_roots
-
-            # Get the type node and try to instantiate for completion
             try:
-                g, tg, _ = state.ensure_graph()
+                completions: list[lsp.CompletionItem] = []
+                existing_labels: set[str] = set()
+
                 node = None
+                try:
+                    node = _resolve_dot_completion_node(state, field_ref)
+                except Exception as e:
+                    logger.debug(f"Dot completion instance resolution error: {e}")
+                if node is not None:
+                    for item in get_node_completions(node):
+                        if item.label in existing_labels:
+                            continue
+                        completions.append(item)
+                        existing_labels.add(item.label)
 
-                # If root_name is a type (like App.something), use it directly
-                if root_name in type_roots:
-                    type_node = type_roots[root_name]
-                    instance = tg.instantiate_node(type_node=type_node, attributes={})
-                    node = fabll.Node(instance=instance)
-                else:
-                    # root_name is a field (like r1.something) - search all types
-                    # to find which one has a child with that name
-                    for type_name, type_node in type_roots.items():
-                        instance = tg.instantiate_node(
-                            type_node=type_node, attributes={}
-                        )
-                        parent_node = fabll.Node(instance=instance)
-                        child_bound = fbrk.EdgeComposition.get_child_by_identifier(
-                            bound_node=parent_node.instance, child_identifier=root_name
-                        )
-                        if child_bound is not None:
-                            node = fabll.Node(instance=child_bound)
-                            break
+                _, tg, _ = state.ensure_graph()
+                type_node = _resolve_dot_completion_type_node(state, field_ref)
+                if type_node is not None:
+                    for item in get_type_node_completions(tg, type_node):
+                        if item.label in existing_labels:
+                            continue
+                        completions.append(item)
+                        existing_labels.add(item.label)
 
-                if node is None:
+                if not completions:
                     return None
-
-                # Navigate through remaining parts (for nested references like r1.x.y)
-                for part in parts[1:]:
-                    part_name = part.split("[")[0] if "[" in part else part
-                    # Find child with this name using get_child_by_identifier
-                    child_bound = fbrk.EdgeComposition.get_child_by_identifier(
-                        bound_node=node.instance, child_identifier=part_name
-                    )
-                    if child_bound is None:
-                        return None
-                    node = fabll.Node(instance=child_bound)
-
-                completions = get_node_completions(node)
+                if member_prefix:
+                    completions = [
+                        item
+                        for item in completions
+                        if item.label.startswith(member_prefix)
+                    ]
                 return lsp.CompletionList(is_incomplete=False, items=completions)
 
             except Exception as e:
                 logger.debug(f"Dot completion error: {e}")
                 return None
 
-        # "new" keyword completion
-        elif stripped.endswith("new"):
+        # "new" keyword completion, including partial symbols like `new Tex`
+        elif new_match := re.search(
+            r"\bnew(?:\s+([A-Za-z_][A-Za-z0-9_]*))?$", stripped
+        ):
             state = get_document_state(uri)
-            items = []
-
-            # Add types from current file
-            if state.build_result:
-                for name, type_node in state.build_result.state.type_roots.items():
-                    items.append(
-                        lsp.CompletionItem(
-                            label=name,
-                            kind=lsp.CompletionItemKind.Class,
-                            detail="Local type",
-                        )
-                    )
-
-            # Add stdlib types - filter for modules and interfaces
-            for node_type in get_stdlib_types():
-                if _is_module_or_interface_type(node_type):
-                    items.append(node_type_to_completion_item(node_type))
-
+            items = _get_available_new_symbol_completions(uri, document.source, state)
+            prefix = new_match.group(1) or ""
+            if prefix:
+                items = [item for item in items if item.label.startswith(prefix)]
             return lsp.CompletionList(is_incomplete=False, items=items)
 
         # "import" keyword completion (stdlib)
@@ -1374,9 +2015,8 @@ def on_document_completion(params: lsp.CompletionParams) -> lsp.CompletionList |
             "import " in char_before and stripped.endswith(",")
         ):
             if "from" in char_before:
-                # from "path" import - need to get types from that file
-                # For now, fall back to stdlib
-                pass
+                items = _get_types_from_import_target(uri, char_before)
+                return lsp.CompletionList(is_incomplete=False, items=items)
 
             items = []
             for node_type in get_stdlib_types():
@@ -1407,9 +2047,25 @@ def on_document_completion(params: lsp.CompletionParams) -> lsp.CompletionList |
 @LSP_SERVER.feature(lsp.TEXT_DOCUMENT_HOVER)
 def on_document_hover(params: lsp.HoverParams) -> lsp.Hover | None:
     """Handle hover request."""
+    if _broker_manages_document(params.text_document.uri):
+        return _broker_query(
+            params.text_document.uri,
+            "hover",
+            {
+                "line": params.position.line,
+                "character": params.position.character,
+            },
+        )
+    return _document_hover_impl(params)
+
+
+def _document_hover_impl(params: lsp.HoverParams) -> lsp.Hover | None:
+    """Hover implementation that operates on the local in-process state."""
     try:
         uri = params.text_document.uri
         state = get_document_state(uri)
+        if _position_is_invalid(state, params.position):
+            return None
         document = LSP_SERVER.workspace.get_text_document(uri)
 
         # First, try to get the word under cursor for type info
@@ -1864,9 +2520,27 @@ def on_document_definition(
     params: lsp.DefinitionParams,
 ) -> lsp.Location | list[lsp.LocationLink] | None:
     """Handle go-to-definition request."""
+    if _broker_manages_document(params.text_document.uri):
+        return _broker_query(
+            params.text_document.uri,
+            "definition",
+            {
+                "line": params.position.line,
+                "character": params.position.character,
+            },
+        )
+    return _document_definition_impl(params)
+
+
+def _document_definition_impl(
+    params: lsp.DefinitionParams,
+) -> lsp.Location | list[lsp.LocationLink] | None:
+    """Definition implementation that operates on the local in-process state."""
     try:
         uri = params.text_document.uri
         state = get_document_state(uri)
+        if _position_is_invalid(state, params.position):
+            return None
 
         # Try AST-based lookup first
         if state.ast_nodes:
@@ -1931,9 +2605,27 @@ def on_document_type_definition(
     This takes you from an instance (e.g., ldo_3V3) to its type definition
     (e.g., TLV75901_driver module definition).
     """
+    if _broker_manages_document(params.text_document.uri):
+        return _broker_query(
+            params.text_document.uri,
+            "type_definition",
+            {
+                "line": params.position.line,
+                "character": params.position.character,
+            },
+        )
+    return _document_type_definition_impl(params)
+
+
+def _document_type_definition_impl(
+    params: lsp.TypeDefinitionParams,
+) -> lsp.Location | list[lsp.LocationLink] | None:
+    """Type-definition implementation that operates on the local in-process state."""
     try:
         uri = params.text_document.uri
         state = get_document_state(uri)
+        if _position_is_invalid(state, params.position):
+            return None
 
         # Get the field reference at the cursor position
         document = LSP_SERVER.workspace.get_text_document(uri)
@@ -1968,9 +2660,10 @@ def _get_instance_type_name(field_path: str, state: DocumentState) -> str | None
     For example, if `ldo_3V3 = new TLV75901_driver`, returns "TLV75901_driver".
     """
     if state.type_graph is None or state.graph_view is None:
-        logger.info(
-            f"Instance type lookup early return: tg={state.type_graph is not None}, "
-            f"g={state.graph_view is not None}"
+        logger.debug(
+            "Instance type lookup early return: tg=%s g=%s",
+            state.type_graph is not None,
+            state.graph_view is not None,
         )
         return None
 
@@ -2018,11 +2711,28 @@ def _get_instance_type_name(field_path: str, state: DocumentState) -> str | None
                             pass
 
                 except Exception as e:
-                    logger.info(f"Error checking assignment for type: {e}")
+                    logger.debug("Error checking assignment for type: %s", e)
                     continue
 
     except Exception as e:
         logger.debug(f"Instance type lookup error: {e}")
+
+    try:
+        resolved_type = _resolve_dot_completion_type_node(state, stripped_path)
+        if resolved_type is not None:
+            if state.build_result is not None:
+                for (
+                    local_name,
+                    local_type,
+                ) in state.build_result.state.type_roots.items():
+                    try:
+                        if resolved_type.node().is_same(other=local_type.node()):
+                            return local_name
+                    except Exception:
+                        continue
+            return fbrk.TypeGraph.get_type_name(type_node=resolved_type)
+    except Exception as e:
+        logger.debug("Recursive instance type lookup error: %s", e)
 
     return None
 
@@ -2040,6 +2750,60 @@ def _find_instance_type_definition(
     type_name = _get_instance_type_name(field_path, state)
     if type_name:
         return _find_type_definition(type_name, state, uri)
+    return None
+
+
+def _find_member_in_typegraph(
+    member_name: str,
+    type_node: graph.BoundNode,
+    state: DocumentState,
+    fallback_uri: str,
+) -> lsp.Location | None:
+    from atopile.compiler.ast_visitor import ASTVisitor
+
+    if state.type_graph is None:
+        return None
+
+    try:
+        for identifier, make_child in state.type_graph.collect_make_children(
+            type_node=type_node
+        ):
+            base_name = identifier.split("[", 1)[0] if identifier else identifier
+            if identifier != member_name and base_name != member_name:
+                continue
+
+            source_chunk = ASTVisitor.get_source_chunk(make_child)
+            if source_chunk is None:
+                continue
+
+            loc = source_chunk.loc.get()
+            target_uri = fallback_uri
+            if source_path := source_chunk.get_path():
+                target_uri = Path(source_path).resolve().as_uri()
+
+            start_char = loc.get_start_col()
+            end_char = loc.get_end_col()
+            found_at = source_chunk.get_text().find(member_name)
+            if found_at >= 0:
+                start_char += found_at
+                end_char = start_char + len(member_name)
+
+            return lsp.Location(
+                uri=target_uri,
+                range=lsp.Range(
+                    start=lsp.Position(
+                        line=loc.get_start_line() - 1,
+                        character=start_char,
+                    ),
+                    end=lsp.Position(
+                        line=loc.get_end_line() - 1,
+                        character=end_char,
+                    ),
+                ),
+            )
+    except Exception as e:
+        logger.debug("Error finding member in typegraph: %s", e)
+
     return None
 
 
@@ -2074,6 +2838,14 @@ def _find_child_member_definition(
     # Get the parent path (everything before the clicked member)
     parent_path = ".".join(parts[:member_index])
 
+    if (
+        parent_type_node := _resolve_dot_completion_type_node(state, parent_path)
+    ) is not None:
+        if location := _find_member_in_typegraph(
+            clicked_member, parent_type_node, state, uri
+        ):
+            return location
+
     # Find the type of the parent
     parent_type_name = _get_instance_type_name(parent_path, state)
     if not parent_type_name:
@@ -2084,24 +2856,6 @@ def _find_child_member_definition(
     # Now find where clicked_member is defined within parent_type_name
     # This could be in a local type definition or in a stdlib/external type
 
-    # First, check local type definitions
-    if state.build_result is not None:
-        type_roots = state.build_result.state.type_roots
-
-        if parent_type_name in type_roots:
-            # Search for the child member definition within this type's block
-            for node_loc in state.ast_nodes:
-                if isinstance(node_loc.node, AST.BlockDefinition):
-                    try:
-                        if node_loc.node.get_type_ref_name() == parent_type_name:
-                            # Found the parent type definition, now search within it
-                            # for the child member assignment
-                            return _find_member_in_block(
-                                clicked_member, node_loc, state, uri
-                            )
-                    except Exception:
-                        continue
-
     # Check stdlib types
     stdlib_type = _find_stdlib_type(parent_type_name)
     if stdlib_type is not None:
@@ -2110,67 +2864,6 @@ def _find_child_member_definition(
 
     # Check external types
     return _find_member_in_external_type(clicked_member, parent_type_name, state, uri)
-
-
-def _find_member_in_block(
-    member_name: str,
-    block_node_loc: ASTNodeLocation,
-    state: DocumentState,
-    uri: str,
-) -> lsp.Location | None:
-    """Find a member definition within a block definition."""
-    if state.type_graph is None or state.graph_view is None:
-        return None
-
-    try:
-        g = state.graph_view
-        tg = state.type_graph
-
-        # Get the block's source location range to filter nodes
-        block_start = block_node_loc.start_line
-        block_end = block_node_loc.end_line
-
-        # Search through all Assignment nodes
-        assignment_type = AST.Assignment.bind_typegraph(tg)
-        for inst in assignment_type.get_instances(g):
-            try:
-                assignment = inst.cast(AST.Assignment)
-                loc = assignment.source.get().loc.get()
-
-                # Check if this assignment is within the block
-                if not (block_start <= loc.get_start_line() <= block_end):
-                    continue
-
-                # Get the target name
-                target = assignment.target.get().deref()
-                target_fr = target.cast(AST.FieldRef)
-                parts = list(target_fr.parts.get().as_list())
-
-                # We want single-part assignments (direct children)
-                if len(parts) == 1:
-                    part = parts[0].cast(AST.FieldRefPart)
-                    name = part.name.get().get_single()
-                    if name == member_name:
-                        return lsp.Location(
-                            uri=uri,
-                            range=lsp.Range(
-                                start=lsp.Position(
-                                    line=loc.get_start_line() - 1,
-                                    character=loc.get_start_col(),
-                                ),
-                                end=lsp.Position(
-                                    line=loc.get_end_line() - 1,
-                                    character=loc.get_end_col(),
-                                ),
-                            ),
-                        )
-            except Exception:
-                continue
-
-    except Exception as e:
-        logger.debug(f"Error finding member in block: {e}")
-
-    return None
 
 
 def _find_member_in_stdlib_type(
@@ -2231,7 +2924,7 @@ def _find_member_in_external_type(
             # Resolve the path
             current_file_path = get_file_path(uri)
             current_dir = current_file_path.parent
-            project_dir = find_project_dir(current_file_path)
+            project_dir = _infer_lsp_project_root(current_file_path)
 
             target_file = None
 
@@ -2434,6 +3127,17 @@ def _find_definition_location(
             name = node.name.get().get_single()
             return _find_type_definition(name, state, uri)
 
+        elif isinstance(node, AST.ImportStmt):
+            imported_type = node.get_type_ref_name()
+            import_path = node.get_path()
+
+            if import_path:
+                target_file = _resolve_import_target_path(uri, import_path)
+                if target_file is not None:
+                    return _find_type_in_ato_file(imported_type, target_file)
+
+            return _find_type_definition(imported_type, state, uri)
+
         elif isinstance(node, AST.FieldRef):
             # Get the field path being clicked on
             parts = list(node.parts.get().as_list())
@@ -2574,6 +3278,14 @@ def _find_type_definition(
                     except Exception:
                         continue
 
+    with suppress(Exception):
+        document = LSP_SERVER.workspace.get_text_document(uri)
+        imported_location = _find_imported_type_definition_from_source(
+            type_name, document.source, uri
+        )
+        if imported_location is not None:
+            return imported_location
+
     # Check for imported types from external .ato files
     external_location = _find_external_type_definition(type_name, state, uri)
     if external_location is not None:
@@ -2609,7 +3321,7 @@ def _find_external_type_definition(
         # Get the current file's directory and project directory
         current_file_path = get_file_path(uri)
         current_dir = current_file_path.parent
-        project_dir = find_project_dir(current_file_path)
+        project_dir = _infer_lsp_project_root(current_file_path)
 
         # Try multiple resolution strategies in order of priority:
 
@@ -2628,6 +3340,39 @@ def _find_external_type_definition(
             relative_to_project = project_dir / import_ref.path
             if relative_to_project.exists():
                 return _find_type_in_ato_file(type_name, relative_to_project)
+
+    return None
+
+
+def _find_imported_type_definition_from_source(
+    type_name: str, source: str, uri: str
+) -> lsp.Location | None:
+    """Find a path-imported type definition directly from document source."""
+    type_pattern = re.compile(r"\b" + re.escape(type_name) + r"\b")
+
+    for line in source.splitlines():
+        match = re.match(
+            r'\s*from\s+"(?P<path>[^"]+)"\s+import\s+(?P<names>.+)\s*$', line
+        )
+        if not match:
+            continue
+
+        names = [name.strip() for name in match.group("names").split(",")]
+        if type_name not in names:
+            continue
+
+        target_file = _resolve_import_target_path(uri, match.group("path"))
+        if target_file is None:
+            continue
+
+        location = _find_type_in_ato_file(type_name, target_file)
+        if location is not None:
+            return location
+
+        # Support imports that may contain aliases or stray whitespace by checking the
+        # original names segment for the exact symbol token before giving up.
+        if type_pattern.search(match.group("names")):
+            return _find_type_in_ato_file(type_name, target_file)
 
     return None
 
@@ -2714,6 +3459,23 @@ def on_code_action(
     params: lsp.CodeActionParams,
 ) -> list[lsp.CodeAction] | None:
     """Handle code action request (e.g., auto-import, open datasheet)."""
+    if _broker_manages_document(params.text_document.uri):
+        return _broker_query(
+            params.text_document.uri,
+            "code_action",
+            {
+                "start_line": params.range.start.line,
+                "start_character": params.range.start.character,
+                "end_line": params.range.end.line,
+                "end_character": params.range.end.character,
+                "diagnostics": params.context.diagnostics,
+            },
+        )
+    return _code_action_impl(params)
+
+
+def _code_action_impl(params: lsp.CodeActionParams) -> list[lsp.CodeAction] | None:
+    """Code-action implementation that operates on the local in-process state."""
     try:
         uri = params.text_document.uri
         document = LSP_SERVER.workspace.get_text_document(uri)
@@ -2899,7 +3661,7 @@ def _create_datasheet_action(uri: str, position: lsp.Position) -> lsp.CodeAction
             return None
 
         # Try to find local datasheet file first
-        project_dir = find_project_dir(current_file)
+        project_dir = _infer_lsp_project_root(current_file)
         if project_dir:
             # Check both possible locations
             search_paths = [
@@ -2973,8 +3735,26 @@ def on_find_references(
     params: lsp.ReferenceParams,
 ) -> list[lsp.Location] | None:
     """Handle find references request."""
+    if _broker_manages_document(params.text_document.uri):
+        return _broker_query(
+            params.text_document.uri,
+            "references",
+            {
+                "line": params.position.line,
+                "character": params.position.character,
+                "include_declaration": params.context.include_declaration,
+            },
+        )
+    return _find_references_impl(params)
+
+
+def _find_references_impl(params: lsp.ReferenceParams) -> list[lsp.Location] | None:
+    """Find-references implementation that operates on the local in-process state."""
     try:
         uri = params.text_document.uri
+        state = get_document_state(uri)
+        if _position_is_invalid(state, params.position):
+            return None
         document = LSP_SERVER.workspace.get_text_document(uri)
 
         # Get the field reference at cursor position (e.g., "usb_c.usb" not just "usb")
@@ -2986,10 +3766,13 @@ def on_find_references(
         logger.debug(f"Find references: full_path={full_path}, word={word_at_cursor}")
 
         # Get document state for graph-based search
-        state = get_document_state(uri)
-
         # Use graph-based search (semantic, accurate)
         references = _find_field_references_from_graph(full_path, state, uri)
+        references = [
+            location
+            for location in references
+            if not _range_overlaps_invalid_region(state, location.range)
+        ]
 
         # Optionally include the declaration
         if params.context.include_declaration:
@@ -3156,8 +3939,27 @@ def on_prepare_rename(
     Returns the range of the symbol to be renamed, or None if rename
     is not possible at this position.
     """
+    if _broker_manages_document(params.text_document.uri):
+        return _broker_query(
+            params.text_document.uri,
+            "prepare_rename",
+            {
+                "line": params.position.line,
+                "character": params.position.character,
+            },
+        )
+    return _prepare_rename_impl(params)
+
+
+def _prepare_rename_impl(
+    params: lsp.PrepareRenameParams,
+) -> lsp.PrepareRenameResult | None:
+    """Prepare-rename implementation that operates on the local in-process state."""
     try:
         uri = params.text_document.uri
+        state = get_document_state(uri)
+        if _position_is_invalid(state, params.position):
+            return None
         document = LSP_SERVER.workspace.get_text_document(uri)
         source = document.source
         position = params.position
@@ -3186,8 +3988,26 @@ def on_rename(params: lsp.RenameParams) -> lsp.WorkspaceEdit | None:
     Finds all references to the symbol and returns a WorkspaceEdit
     containing the text edits to rename all occurrences.
     """
+    if _broker_manages_document(params.text_document.uri):
+        return _broker_query(
+            params.text_document.uri,
+            "rename",
+            {
+                "line": params.position.line,
+                "character": params.position.character,
+                "new_name": params.new_name,
+            },
+        )
+    return _rename_impl(params)
+
+
+def _rename_impl(params: lsp.RenameParams) -> lsp.WorkspaceEdit | None:
+    """Rename implementation that operates on the local in-process state."""
     try:
         uri = params.text_document.uri
+        state = get_document_state(uri)
+        if _position_is_invalid(state, params.position):
+            return None
         document = LSP_SERVER.workspace.get_text_document(uri)
         source = document.source
         position = params.position
@@ -3206,11 +4026,14 @@ def on_rename(params: lsp.RenameParams) -> lsp.WorkspaceEdit | None:
         old_name, _ = symbol_info
 
         # Get document state for graph-based search
-        state = get_document_state(uri)
-
         # Find all references using the graph
         # We need to find all occurrences of the symbol name
         text_edits = _find_rename_edits(old_name, new_name, state, uri, source)
+        text_edits = [
+            edit
+            for edit in text_edits
+            if not _range_overlaps_invalid_region(state, edit.range)
+        ]
 
         if not text_edits:
             return None
@@ -3962,6 +4785,7 @@ def on_document_formatting(
 def on_shutdown(_params: Any = None) -> None:
     """Handle shutdown request."""
     logger.info("LSP server shutting down")
+    BROKER.shutdown()
     # Clean up document states
     for state in DOCUMENT_STATES.values():
         state.reset_graph()

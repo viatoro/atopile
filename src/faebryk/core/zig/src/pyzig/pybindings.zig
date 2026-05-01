@@ -1,4 +1,5 @@
 pub const std = @import("std");
+const cast = @import("cast");
 
 /// Python API version for module creation
 /// This must match Python's sys.api_version (check with: python -c "import sys; print(sys.api_version)")
@@ -271,7 +272,8 @@ pub fn Py_TYPE(obj: ?*PyObject) ?*PyTypeObject {
         ob_type: ?*PyTypeObject,
     };
 
-    const obj_layout: *PyObjectLayout = @ptrCast(@alignCast(obj));
+    // CPython guarantees PyObject* has alignment >= alignof(max_align_t) (>= 8 on all supported platforms).
+    const obj_layout = cast.ctx(PyObjectLayout, obj);
     return obj_layout.ob_type;
 }
 

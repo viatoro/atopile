@@ -12,6 +12,7 @@ if __name__ in ("__main__", "atopile.cli.cli"):
 
 import json
 import logging
+import os
 from enum import Enum
 from importlib.metadata import version as get_package_version
 from pathlib import Path
@@ -29,11 +30,10 @@ from atopile.cli import (
     install,
     kicad_ipc,
     lsp,
-    mcp,
     package,
     serve,
-    view,
 )
+from atopile.cli.auth import auth_app
 from atopile.errors import (
     UserException,
     UserNoProjectException,
@@ -140,7 +140,7 @@ def cli(
                     resource.RLIMIT_CORE,
                     (resource.RLIM_INFINITY, resource.RLIM_INFINITY),
                 )
-            except (ValueError, OSError):
+            except ValueError, OSError:
                 pass  # Best effort - may fail if system limit is lower
 
         args = [arg for arg in sys.argv if arg != "--safe"]
@@ -179,8 +179,6 @@ def cli(
     if verbose == 1:
         handler.hide_traceback_types = ()
         handler.tracebacks_show_locals = True
-    elif verbose == 2:
-        handler.tracebacks_suppress_map = {}  # Traceback through atopile infra
     elif verbose >= 3:
         logger.root.setLevel(logging.DEBUG)
         handler.setLevel(logging.DEBUG)
@@ -205,17 +203,16 @@ app.command()(build.build)
 app.add_typer(create.create_app, name="create")
 app.command(deprecated=True, hidden=True)(install.install)
 app.command()(inspect_.inspect)
-app.command()(view.view)
 app.add_typer(package.package_app, name="package", hidden=True)
 app.add_typer(install.dependencies_app, name="dependencies", help="Manage dependencies")
 app.command(rich_help_panel="Shortcuts")(install.sync)
 app.command(rich_help_panel="Shortcuts")(install.add)
 app.command(rich_help_panel="Shortcuts")(install.remove)
 app.add_typer(lsp.lsp_app, name="lsp", hidden=True)
-app.add_typer(mcp.mcp_app, name="mcp", hidden=True)
 app.add_typer(kicad_ipc.kicad_ipc_app, name="kicad-ipc", hidden=True)
 app.add_typer(dev.dev_app, name="dev", hidden=True)
 app.add_typer(serve.serve_app, name="serve")
+app.add_typer(auth_app, name="auth", help="Manage authentication")
 
 
 @app.command(hidden=True)
@@ -287,7 +284,14 @@ def main():
         - exit(1): FAILED
         - exit(130): CANCELLED (SIGINT)
     """
-    from atopile import telemetry
+    # Start the forkserver early, before any command creates threads.
+    # Workers skip this since they never spawn child builds.
+    if not os.environ.get("ATO_BUILD_WORKER"):
+        from atopile.mp_context import get_mp_context
+
+        get_mp_context()
+
+    from atopile.telemetry import telemetry
 
     try:
         app()

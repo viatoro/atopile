@@ -55,81 +55,61 @@ _Quantity = tuple[float, fabll._ChildField]
 logger = get_logger(__name__)
 
 
-# FIXME: needs expanding
-# Allowlist for user-importable types — everything here should be documented and
-# supported
-AllowListT = set[type[fabll.Node]]
-STDLIB_ALLOWLIST: AllowListT = (
-    # Modules
+StdlibTypesT = set[type[fabll.Node]]
+
+# Namespace modules in _F that contain nested user-importable Node types
+_STDLIB_NAMESPACE_MODULES = ("PCBManufacturing", "Pickable", "DataInterface")
+
+# Modules in _F that are internal infrastructure and should not be user-importable
+_STDLIB_INTERNAL_MODULES = frozenset(
     {
-        F.Addressor,
-        F.BJT,
-        F.CAN,
-        F.CAN_TTL,
-        F.Capacitor,
-        F.CapacitorPolarized,
-        F.MultiCapacitor,
-        F.Crystal_Oscillator,
-        F.Crystal,
-        F.DifferentialPair,
-        F.Diode,
-        F.Electrical,
-        F.ElectricLogic,
-        F.ElectricPower,
-        F.ElectricSignal,
-        F.Ethernet,
-        F.FilterElectricalRC,
-        F.Fuse,
-        F.HDMI,
-        F.I2C,
-        F.I2S,
-        F.Inductor,
-        F.JTAG,
-        F.LED,
-        F.MOSFET,
-        F.MultiSPI,
-        F.Net,
-        F.PDM,
-        F.Resistor,
-        F.ResistorVoltageDivider,
-        F.Regulator,
-        F.AdjustableRegulator,
-        F.RS232,
-        F.RS485HalfDuplex,
-        F.SPI,
-        F.SPIFlash,
-        F.SWD,
-        F.UART_Base,
-        F.UART,
-        F.USB2_0_IF,
-        F.USB2_0,
-        F.USB3,
-        F.USB3_IF,
-        F.XtalIF,
-        F.TestPoint,
-        F.MountingHole,
-        F.NetTie,
-    }
-) | (
-    # Traits
-    {
-        F.can_bridge_by_name,
-        F.can_bridge,
-        F.has_datasheet,
-        F.has_designator_prefix,
-        F.has_doc_string,
-        F.has_net_name_affix,
-        F.has_net_name_suggestion,
-        F.has_package_requirements,
-        F.Pickable.has_part_picked,
-        F.has_part_removed,
-        F.has_single_electric_reference,
-        F.is_atomic_part,
-        F.is_auto_generated,
-        F.Pickable.is_pickable,
-        F.requires_external_usage,
+        "Collections",
+        "Expressions",
+        "Footprints",
+        "KiCadFootprints",
+        "Lead",
+        "Literals",
+        "NumberDomain",
+        "Parameters",
+        "PCB",
+        "PCBManufacturing",
+        "Pickable",
+        "SerializableMetadata",
+        "Units",
+        "bus_parameter_utils",
     }
 )
+
+
+def _discover_stdlib_types() -> StdlibTypesT:
+    """Discover all user-importable Node subclasses from the faebryk library."""
+    import inspect
+
+    types: StdlibTypesT = set()
+
+    for name in F.__all__:
+        if name in _STDLIB_INTERNAL_MODULES:
+            continue
+        obj = getattr(F, name, None)
+        if obj is None:
+            continue
+        if isinstance(obj, type) and issubclass(obj, fabll.Node):
+            types.add(obj)
+
+    # Collect nested Node classes from namespace modules
+    for ns_name in _STDLIB_NAMESPACE_MODULES:
+        ns = getattr(F, ns_name, None)
+        if ns is None or not inspect.ismodule(ns):
+            continue
+        for attr_name in dir(ns):
+            attr = getattr(ns, attr_name, None)
+            if isinstance(attr, type) and issubclass(attr, fabll.Node):
+                types.add(attr)
+
+    return types
+
+
+STDLIB_TYPES: StdlibTypesT = _discover_stdlib_types()
 
 
 # TODO: restore prefix, fix matching so packages still build
@@ -147,6 +127,7 @@ class BuildState:
             list[DSLTracebackFrame],
         ]
     ]  # [Type Reference Node, Import Reference, Source Chunk, Traceback Stack]
+    explicit_import_refs: list[tuple[ImportRef, fabll.Node | None]]
     file_path: Path | None
     import_path: str | None
     pending_execution: list[DeferredForLoop] = field(default_factory=list)
@@ -156,6 +137,7 @@ class BuildState:
     constraining_expr_types: dict[str, type[fabll.Node]] = field(default_factory=dict)
     type_aliases: dict[str, dict[str, FieldPath]] = field(default_factory=dict)
     inheritance_imports: list[ImportRef] = field(default_factory=list)
+    compiled_file_timings_ms: dict[str, float] = field(default_factory=dict)
 
     def get_type_root(self, name: str) -> graph.BoundNode:
         return self.type_roots[name]
@@ -366,17 +348,19 @@ class _TypeContextStack:
     def _format_path_error(
         field_path: FieldPath, error: fbrk.TypeGraphPathError
     ) -> str:
-        full_path = ".".join(error.path) if error.path else str(field_path)
+        full_path = (
+            FieldPath.format_identifiers(error.path) if error.path else str(field_path)
+        )
 
         match error.kind:
             # FIXME: enum or different types or format on Zig side
             case "missing_parent":
                 prefix = error.path[: error.failing_segment_index]
-                joined = ".".join(prefix) if prefix else full_path
+                joined = FieldPath.format_identifiers(prefix) if prefix else full_path
                 return f"Field `{joined}` is not defined in scope"
             case "invalid_index":
                 container_segments = error.path[: error.failing_segment_index]
-                container = ".".join(container_segments)
+                container = FieldPath.format_identifiers(container_segments)
                 index_value = (
                     error.index_value
                     if error.index_value is not None
@@ -469,6 +453,13 @@ class ASTVisitor:
         EXPERIMENT = "experiment"
 
     class _Experiment(StrEnum):
+        pass
+
+    class _RetiredExperiment(StrEnum):
+        """
+        Experiments merged into the language. Kept so existing pragmas don't crash.
+        """
+
         BRIDGE_CONNECT = "BRIDGE_CONNECT"
         FOR_LOOP = "FOR_LOOP"
         TRAITS = "TRAITS"
@@ -482,7 +473,7 @@ class ASTVisitor:
         type_graph: fbrk.TypeGraph,
         import_path: str | None,
         file_path: Path | None,
-        stdlib_allowlist: set[type[fabll.Node]] | None = None,
+        extra_types: set[type[fabll.Node]] | None = None,
     ) -> None:
         self._ast_root = ast_root
         self._graph = graph
@@ -490,6 +481,7 @@ class ASTVisitor:
         self._state = BuildState(
             type_roots={},
             external_type_refs=[],
+            explicit_import_refs=[],
             file_path=file_path,
             import_path=import_path,
             pending_execution=[],
@@ -504,10 +496,8 @@ class ASTVisitor:
             state=self._state,
             traceback_stack=self._traceback_stack,
         )
-        self._stdlib_allowlist = {
-            type_._type_identifier(): type_
-            for type_ in stdlib_allowlist or STDLIB_ALLOWLIST.copy()
-        }
+        all_types = STDLIB_TYPES | (extra_types or set())
+        self._stdlib_types = {type_._type_identifier(): type_ for type_ in all_types}
         self._expr_counter = itertools.count()
 
     def _raise(
@@ -659,12 +649,16 @@ class ASTVisitor:
         )
 
         if owning_type is None:
-            raise CompilerException(f"Cannot resolve type for path {parent_path}")
+            raise CompilerException(
+                f"Cannot resolve type for path "
+                f"{FieldPath.format_identifiers(parent_path)}"
+            )
 
         if resolved_node is None:
             # Incomplete linking
             raise CompilerException(
-                f"Cannot resolve type for path {loop.container_path}"
+                f"Cannot resolve type for path "
+                f"{FieldPath.format_identifiers(loop.container_path)}"
             )
 
         if (
@@ -672,7 +666,8 @@ class ASTVisitor:
             == F.Collections.PointerSequence._type_identifier()
         ):
             raise DslTypeError(
-                f"Cannot iterate over `{'.'.join(loop.container_path)}`: "
+                f"Cannot iterate over "
+                f"`{FieldPath.format_identifiers(loop.container_path)}`: "
                 f"expected a sequence, got `{type_name}`"
             )
 
@@ -769,15 +764,21 @@ class ASTVisitor:
 
                 (experiment_name,) = pragma_args
 
+                if experiment_name in ASTVisitor._RetiredExperiment.__members__:
+                    logger.debug(
+                        f"Experiment `{experiment_name}` has been merged into"
+                        f" the language and no longer requires a pragma"
+                    )
+                    return
+
                 try:
                     experiment = ASTVisitor._Experiment(experiment_name)
-                except ValueError:
+                except ValueError, TypeError:
                     self._raise(
                         DslValueError,
                         f"Experiment not recognized: `{experiment_name}`",
                         node,
                     )
-
                 self.enable_experiment(experiment)
             case _:
                 self._raise(
@@ -789,14 +790,41 @@ class ASTVisitor:
         path = node.get_path()
         import_ref = ImportRef(name=type_ref_name, path=path)
 
-        is_stdlib = type_ref_name in self._stdlib_allowlist
+        is_stdlib = type_ref_name in self._stdlib_types
         is_trait_shim = TraitOverrideRegistry.matches_trait_override(type_ref_name)
+
+        if (
+            is_trait_shim
+            and path is None
+            and TraitOverrideRegistry.is_deprecated_trait_override(type_ref_name)
+        ):
+            replacement = TraitOverrideRegistry.get_trait_override_replacement(
+                type_ref_name
+            )
+            if replacement is not None:
+                warning = DeprecatedException(
+                    f"'{type_ref_name}' is deprecated. Use '{replacement}' instead."
+                )
+                warning.source_chunk = node.source.get()
+                with downgrade(DeprecatedException):
+                    raise warning
+
         if path is None and not is_stdlib and not is_trait_shim:
+            if type_ref_name in _STDLIB_INTERNAL_MODULES:
+                self._raise(
+                    DslImportError,
+                    f"`{type_ref_name}` is an internal module"
+                    " and cannot be imported in .ato files",
+                    node,
+                )
             self._raise(
                 DslImportError,
                 f"Standard library import not found: {type_ref_name}",
                 node,
             )
+
+        if path is not None:
+            self._state.explicit_import_refs.append((import_ref, node))
 
         self._scope_stack.add_symbol(Symbol(name=type_ref_name, import_ref=import_ref))
 
@@ -1038,7 +1066,7 @@ class ASTVisitor:
         # Check if module type is in stdlib (only when explicitly imported)
         # or an imported python module
         module_fabll_type = (
-            self._stdlib_allowlist.get(new_spec.type_identifier)
+            self._stdlib_types.get(new_spec.type_identifier)
             if new_spec.type_identifier is not None and new_spec.symbol is not None
             else None
         )
@@ -1181,8 +1209,29 @@ class ASTVisitor:
                         f"Field `{target_path}` with index cannot be assigned with new",
                         node,
                     )
+                if target_path.is_singleton() and self._type_stack.field_exists(
+                    target_path.leaf.identifier
+                ):
+                    self._raise(
+                        DslKeyError,
+                        f"Redefining `{target_path.leaf.identifier}` is not allowed",
+                        node,
+                    )
+                source_chunk_node = node.source.get()
+                if (
+                    assignable_node.get_value()
+                    .cast(t=AST.is_assignable)
+                    .isinstance(AST.NewExpression)
+                ):
+                    source_chunk_node = (
+                        fabll.Traits(assignable_node.get_value())
+                        .get_obj_raw()
+                        .cast(t=AST.NewExpression)
+                        .type_ref.get()
+                        .source.get()
+                    )
                 return self._handle_new_child(
-                    target_path, new_spec, source_chunk_node=node.source.get()
+                    target_path, new_spec, source_chunk_node=source_chunk_node
                 )
             case ParameterSpec() as param_spec:
                 # If index, check if path is defined in scope
@@ -1545,10 +1594,7 @@ class ASTVisitor:
         type_name = node.get_type_ref_name()
 
         # Extract template arguments if present (e.g., new Addressor<address_bits=2>)
-        if (
-            template_args := self._extract_template_args(node.template.get())
-        ) is not None:
-            self.ensure_experiment(ASTVisitor._Experiment.MODULE_TEMPLATING)
+        template_args = self._extract_template_args(node.template.get())
 
         return NewChildSpec(
             symbol=self._scope_stack.try_resolve_symbol(type_name),
@@ -1817,8 +1863,6 @@ class ASTVisitor:
                     if assignable_value.isinstance(AST.NewExpression):
                         error(stmt)
 
-        self.ensure_experiment(ASTVisitor._Experiment.FOR_LOOP)
-
         loop_var = node.target.get().get_single()
         iterable_node = node.iterable.get().deref()
 
@@ -1889,8 +1933,6 @@ class ASTVisitor:
             1. AddMakeChildAction to create the trait as a child
             2. AddMakeLinkAction to link the target to the trait with EdgeTrait
         """
-        self.ensure_experiment(ASTVisitor._Experiment.TRAITS)
-
         (trait_type_name,) = node.type_ref.get().name.get().get_values()
 
         if not self._scope_stack.symbol_exists(trait_type_name):
@@ -1913,7 +1955,7 @@ class ASTVisitor:
             )
         else:
             try:
-                trait_fabll_type = self._stdlib_allowlist[trait_type_name]
+                trait_fabll_type = self._stdlib_types[trait_type_name]
             except KeyError:
                 self._raise(
                     DslImportError,

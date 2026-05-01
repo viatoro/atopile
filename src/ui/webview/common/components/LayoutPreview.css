@@ -1,0 +1,88 @@
+.layout-preview,
+.layout-preview-empty {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.layout-preview {
+  background: var(--layout-preview-bg, var(--vscode-editor-background, var(--bg-secondary, #111827)));
+}
+
+.layout-preview__shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.layout-preview__canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.layout-preview__loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm, 6px);
+  background: var(--bg-primary, var(--layout-preview-loading-bg, rgba(15, 23, 42, 0.88)));
+  z-index: 2;
+  color: var(--text-muted, var(--vscode-descriptionForeground, #9ca3af));
+}
+
+.layout-preview__loading.hidden {
+  display: none;
+}
+
+.layout-preview .initial-loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-sm, 6px);
+}
+
+.layout-preview .initial-loading-spinner {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 2px solid var(--layout-preview-spinner-track, rgba(255, 255, 255, 0.18));
+  border-top-color: var(--layout-preview-spinner-accent, var(--vscode-focusBorder, #f59e0b));
+  animation: layout-preview-spin 0.8s linear infinite;
+  opacity: 0.5;
+}
+
+.layout-preview .initial-loading-message {
+  color: var(--text-muted, var(--vscode-descriptionForeground, #9ca3af));
+  font-size: var(--font-size-sm, 12px);
+}
+
+.layout-preview .initial-loading-subtext {
+  color: var(--text-muted, var(--vscode-descriptionForeground, #9ca3af));
+  font-size: var(--font-size-xs, 11px);
+  opacity: 0.7;
+}
+
+.layout-preview-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  color: var(--text-muted, var(--vscode-descriptionForeground, #9ca3af));
+  font-size: 12px;
+  text-align: center;
+  background: var(--layout-preview-bg, var(--vscode-editor-background, var(--bg-secondary, #111827)));
+}
+
+@keyframes layout-preview-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

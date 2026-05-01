@@ -193,7 +193,13 @@ async function main() {
     await page.waitForSelector("#editor-canvas", { timeout: 120000 });
     await sleep(500);
 
-    const model = await page.evaluate(async () => (await fetch("/api/render-model")).json());
+    const model = await page.evaluate(async () => {
+        const client = window.__layoutRpcClient;
+        if (!client || typeof client.fetchRenderModel !== "function") {
+            throw new Error("Standalone layout RPC client is not available");
+        }
+        return await client.fetchRenderModel();
+    });
     const bbox = computeModelBBox(model);
     const fp = model.footprints.find((candidate) => (candidate.pads || []).length > 0) || model.footprints[0];
     if (!fp) {

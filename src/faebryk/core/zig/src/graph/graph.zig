@@ -1,5 +1,6 @@
 const std = @import("std");
 const visitor = @import("visitor.zig");
+const cast = @import("cast");
 
 pub const str = []const u8;
 
@@ -1092,7 +1093,7 @@ pub const GraphView = struct {
             path_allocator: std.mem.Allocator,
 
             pub fn visit_fn(self_ptr: *anyopaque, bound_edge: BoundEdgeReference) visitor.VisitResult(void) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
                 const other_node = bound_edge.edge.get_other_node(self.start_node_ev.node);
 
                 if (self.current_path.contains(other_node)) {
@@ -1199,7 +1200,6 @@ test "BFSPath cloneAndExtend preserves start metadata" {
     const TestEdgeType = Edge.hash_edge_type(0xFBAF_0001);
     Edge.register_type(TestEdgeType) catch |err| switch (err) {
         error.DuplicateType => {},
-        else => return err,
     };
 
     const bn1 = g.create_and_insert_node();
@@ -1260,7 +1260,6 @@ test "get_subgraph_from_nodes" {
     const TestEdgeTypeSubgraph = Edge.hash_edge_type(0xFBAF_0002);
     Edge.register_type(TestEdgeTypeSubgraph) catch |err| switch (err) {
         error.DuplicateType => {},
-        else => return err,
     };
 
     const bn1 = g.create_and_insert_node();
@@ -1298,7 +1297,6 @@ test "duplicate edge insertion" {
     const TestLinkType = Edge.hash_edge_type(0xDEADBEEF);
     Edge.register_type(TestLinkType) catch |err| switch (err) {
         error.DuplicateType => {},
-        else => return err,
     };
 
     const e1 = EdgeReference.init(bn1.node, bn2.node, TestLinkType);
@@ -1329,7 +1327,7 @@ test "insert_subgraph performance" {
         _ = g2.create_and_insert_node();
     }
 
-    var timer = try std.time.Timer.start();
+    var timer = @import("compat").MonoTimer.start();
     g1.insert_subgraph(&g2);
     const duration = timer.read();
 
@@ -1368,7 +1366,7 @@ test "speed_insert_node_simple" {
     var g = GraphView.init(a);
     defer g.deinit();
 
-    var timer = try std.time.Timer.start();
+    var timer = @import("compat").MonoTimer.start();
     const num_nodes = 100000;
     var i: usize = 0;
     while (i < num_nodes) : (i += 1) {
@@ -1400,7 +1398,7 @@ test "speed_insert_edge_simple" {
         n2s[i] = g.create_and_insert_node().node;
     }
 
-    var timer = try std.time.Timer.start();
+    var timer = @import("compat").MonoTimer.start();
     i = 0;
     while (i < count) : (i += 1) {
         const e = EdgeReference.init(n1s[i], n2s[i], 0);

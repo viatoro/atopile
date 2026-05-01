@@ -5,3 +5,5 @@ build
 **/~*.kicad_pcb.lck
 **/~_autosave-*.kicad_pcb.lck
 **/fp-info-cache
+# Autolayout per-apply backups (see AutolayoutService._apply_candidate_to_layout)
+**/*.kicad_pcb.bak.*

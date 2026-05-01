@@ -1,0 +1,123 @@
+{
+    "decoupling_constraints": {
+        "U2-2": [
+            {
+                "type": "decoupled_by",
+                "targets": [
+                    "C8-1"
+                ]
+            }
+        ],
+        "D1-5": [
+            {
+                "type": "decoupled_by",
+                "targets": [
+                    "C3-1"
+                ]
+            }
+        ],
+        "U3-1": [
+            {
+                "type": "decoupled_by",
+                "targets": [
+                    "C2-1"
+                ]
+            }
+        ],
+        "U3-4": [
+            {
+                "type": "decoupled_by",
+                "targets": [
+                    "C1-1"
+                ]
+            }
+        ]
+    },
+    "net_type_constraints": [
+        {
+            "type": "high_speed",
+            "targets": [
+                "USB_D_N",
+                "USB_D_P"
+            ]
+        },
+        {
+            "type": "medium_speed",
+            "targets": [
+                "CTS",
+                "RX",
+                "RXD0",
+                "SCLK",
+                "SDA",
+                "TX",
+                "TXD0",
+                "i2c[0]-SCL",
+                "i2s[0]-SCK",
+                "i2s[0]-SD",
+                "i2s[0]-WS",
+                "i2s[1]-SCK",
+                "i2s[1]-SD",
+                "i2s[1]-WS",
+                "spi[2]-MISO",
+                "spi[2]-MOSI",
+                "spi_cs[2]-line",
+                "spi_cs[3]-SCL",
+                "uart[0]-MOSI",
+                "uart[1]-MISO"
+            ]
+        },
+        {
+            "type": "low_speed",
+            "targets": [
+                "IO35",
+                "IO36",
+                "IO37",
+                "IO38",
+                "IO45",
+                "IO46",
+                "IO47",
+                "IO48",
+                "IO9",
+                "TCK",
+                "TDI",
+                "TDO",
+                "TMS",
+                "button-input-input-0",
+                "button-input-input-1",
+                "cc[0]-line",
+                "cc[1]-line",
+                "gpios[0]-output",
+                "output-output",
+                "sbu[0]-line",
+                "sbu[1]-line"
+            ]
+        },
+        {
+            "type": "power",
+            "targets": [
+                "power-VCC",
+                "power_in-VCC",
+                "power_vbus-VCC"
+            ]
+        },
+        {
+            "type": "ground",
+            "targets": [
+                "GND"
+            ]
+        },
+        {
+            "type": "analog",
+            "targets": [
+                "VDIV_OUTPUT"
+            ]
+        },
+        {
+            "type": "unknown",
+            "targets": [
+                "DNC",
+                "net"
+            ]
+        }
+    ]
+}

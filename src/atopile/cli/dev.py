@@ -2,6 +2,7 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -15,23 +16,38 @@ import typer
 
 from atopile import version as ato_version
 from atopile.logging import get_logger
-from atopile.telemetry import capture
-from faebryk.libs.util import ConfigFlag
+from atopile.telemetry.telemetry import capture
 
 logger = get_logger(__name__)
 
-LOG_VIEWER = ConfigFlag(
-    "TEST_LOG_VIEWER",
-    default=True,
-    descr="Build and serve the log viewer UI during tests",
-)
-
-
 dev_app = typer.Typer(rich_markup_mode="rich")
 
-# On Windows, npm/npx are .cmd wrappers, not .exe files.
-# shutil.which() resolves the full path so subprocess can find them.
-_npm = shutil.which("npm") or "npm"
+
+def _dev_workspace_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _prepend_dev_import_paths() -> None:
+    from faebryk.libs.util import repo_root
+
+    for path in (repo_root(), _dev_workspace_root()):
+        path_str = str(path)
+        if path_str not in sys.path:
+            sys.path.insert(0, path_str)
+
+
+# Per-shell venv activation: (activate_script, cmd_template).
+# Templates receive {activate} and {shell} already shell-quoted.
+# Default covers POSIX shells (bash, zsh, dash, ksh, sh, ...).
+_SHELL_ACTIVATE: dict[str, tuple[str, str]] = {
+    "fish": ("activate.fish", ". {activate}; and exec {shell} -i"),
+    "csh": ("activate.csh", "source {activate} && exec {shell} -i"),
+    "tcsh": ("activate.csh", "source {activate} && exec {shell} -i"),
+    "nu": ("activate.nu", "overlay use {activate}; exec {shell} -i"),
+    "pwsh": ("activate.ps1", ". {activate}; exec {shell}"),
+    "powershell": ("activate.ps1", ". {activate}; exec {shell}"),
+}
+_DEFAULT_ACTIVATE = ("activate", ". {activate} && exec {shell} -i")
 
 
 def _spawn_shell_with_venv(worktree_path: Path) -> None:
@@ -43,12 +59,21 @@ def _spawn_shell_with_venv(worktree_path: Path) -> None:
     venv_path = worktree_path / ".venv"
     venv_bin = venv_path / "bin"
 
-    activate = venv_bin / "activate"
+    shell_name = Path(shell).name
+    activate_name, cmd_template = _SHELL_ACTIVATE.get(shell_name, _DEFAULT_ACTIVATE)
+
+    activate = venv_bin / activate_name
     if not activate.is_file():
         raise ValueError(f"activate script not found: {activate}")
 
-    cmd = f". {shlex.quote(str(activate))} && exec {shlex.quote(shell)} -i"
-    subprocess.run([shell, "-i", "-c", cmd], cwd=worktree_path, check=False)
+    cmd = cmd_template.format(
+        activate=shlex.quote(str(activate)),
+        shell=shlex.quote(shell),
+    )
+    # Use a non-interactive bootstrap shell and then `exec` once into an
+    # interactive shell. This avoids recursive interactive-shell startup that
+    # can trigger gitstatus/generator errors in some zsh configurations.
+    subprocess.run([shell, "-c", cmd], cwd=worktree_path, check=False)
 
 
 def _get_compiler_version_for_extension() -> str | None:
@@ -59,120 +84,49 @@ def _get_compiler_version_for_extension() -> str | None:
         return None
 
 
-@dev_app.command()
-@capture("cli:dev_extension_start", "cli:dev_extension_end")
-def extension(
-    skip_install: bool = typer.Option(
-        False, "--skip-install", help="Skip npm install checks."
-    ),
-    launch: bool = typer.Option(
-        True,
-        "--launch/--no-launch",
-        help="Launch VS Code Extension Development Host.",
-    ),
-):
-    """
-    Start the fast VS Code extension development loop.
+def _get_bun() -> str:
+    bun = shutil.which("bun")
+    if bun:
+        return bun
 
-    Runs:
-    - `npm run build -- --watch --outDir
-    ../vscode-atopile/resources/webviews` in `src/ui-server`
-    - `npm run watch` in `src/vscode-atopile` (extension bundle watch)
-    """
-    import time
+    home_bun = Path.home() / ".bun" / "bin" / "bun"
+    if home_bun.is_file():
+        return str(home_bun)
 
-    repo_root = Path(__file__).resolve().parents[3]
-    ui_server_dir = repo_root / "src" / "ui-server"
-    vscode_dir = repo_root / "src" / "vscode-atopile"
-
-    if not ui_server_dir.exists():
-        raise FileNotFoundError(f"ui-server directory not found: {ui_server_dir}")
-    if not vscode_dir.exists():
-        raise FileNotFoundError(f"vscode extension directory not found: {vscode_dir}")
-
-    if not skip_install:
-        if not (ui_server_dir / "node_modules").exists():
-            print("installing ui-server dependencies")
-            subprocess.run([_npm, "install"], cwd=ui_server_dir, check=True)
-        if not (vscode_dir / "node_modules").exists():
-            print("installing vscode-atopile dependencies")
-            subprocess.run([_npm, "install"], cwd=vscode_dir, check=True)
-
-    print("starting ui-server webview build watch")
-    ui_watch = subprocess.Popen(
-        [
-            _npm,
-            "run",
-            "build",
-            "--",
-            "--watch",
-            "--outDir",
-            "../vscode-atopile/resources/webviews",
-        ],
-        cwd=ui_server_dir,
+    typer.secho(
+        "bun not found. Install with: curl -fsSL https://bun.sh/install | bash",
+        fg=typer.colors.RED,
     )
-    print("starting vscode extension webpack watch")
-    ext_watch = subprocess.Popen([_npm, "run", "watch"], cwd=vscode_dir)
+    raise typer.Exit(1)
 
-    if launch:
-        vscode_cli = shutil.which("code") or "code"
-        try:
-            launch_env = os.environ.copy()
-            launch_env["ATOPILE_EXTENSION_DEV_UI"] = "1"
-            subprocess.Popen(
-                [
-                    vscode_cli,
-                    "--new-window",
-                    "--extensionDevelopmentPath",
-                    str(vscode_dir),
-                    str(Path.cwd()),
-                ],
-                env=launch_env,
-            )
-        except FileNotFoundError:
-            typer.secho(
-                "Could not find 'code' CLI. Install it from VS Code command palette.",
-                fg=typer.colors.YELLOW,
-            )
 
-    print("\nExtension dev loop is running.")
-    print("Press Ctrl+C to stop.")
+def _frontend_package_dirs(workspace_root: Path) -> dict[str, Path]:
+    return {
+        "VS Code extension": workspace_root / "src" / "vscode-atopile",
+        "webview": workspace_root / "src" / "ui" / "webview",
+        "layout editor": (
+            workspace_root / "src" / "atopile" / "layout_server" / "frontend"
+        ),
+    }
 
-    exit_code = 0
-    try:
-        while True:
-            for name, process in (
-                ("ui-server", ui_watch),
-                ("vscode-atopile", ext_watch),
-            ):
-                code = process.poll()
-                if code is not None:
-                    typer.secho(
-                        f"{name} exited with code {code}. Stopping other processes.",
-                        fg=typer.colors.RED if code != 0 else typer.colors.YELLOW,
-                    )
-                    exit_code = code
-                    break
-            else:
-                time.sleep(0.5)
-                continue
-            break
-    except KeyboardInterrupt:
-        pass
-    finally:
-        for process in (ui_watch, ext_watch):
-            if process.poll() is None:
-                process.terminate()
-        for process in (ui_watch, ext_watch):
-            if process.poll() is None:
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
 
-    if exit_code != 0:
-        raise typer.Exit(exit_code)
+def _sync_frontend_dependencies(bun: str, package_dirs: dict[str, Path]) -> None:
+    for label, package_dir in package_dirs.items():
+        if not package_dir.is_dir():
+            raise FileNotFoundError(f"{label} directory not found: {package_dir}")
+
+        typer.echo(f"Syncing {label.lower()} dependencies...")
+        subprocess.run([bun, "install"], cwd=package_dir, check=True)
+
+
+def _build_frontend_bundles(
+    bun: str, vscode_dir: Path, layout_frontend_dir: Path
+) -> None:
+    typer.echo("Building VS Code extension and webview bundles...")
+    subprocess.run([bun, "run", "build"], cwd=vscode_dir, check=True)
+
+    typer.echo("Building layout editor frontend assets...")
+    subprocess.run([bun, "run", "build"], cwd=layout_frontend_dir, check=True)
 
 
 @dev_app.command()
@@ -180,29 +134,19 @@ def extension(
 def compile(
     target: str = typer.Argument(
         "all",
-        help="Build target: all, zig, visualizer, or vscode.",
+        help="Build target: all, zig, or vscode.",
     ),
 ):
-    import sys
-
+    """
+    Compile various components of the atopile extension.
+    Valid targets: all, zig, or vscode.
+    """
     target = target.lower()
-    valid_targets = {"all", "zig", "visualizer", "vscode"}
+    valid_targets = {"all", "zig", "vscode"}
     if target not in valid_targets:
         raise typer.BadParameter(
             f"target must be one of: {', '.join(sorted(valid_targets))}"
         )
-
-    if target in {"all", "vscode"}:
-        repo_root = Path(__file__).resolve().parents[3]
-        gen_script = repo_root / "scripts" / "generate_types.py"
-        ui_server_dir = repo_root / "src" / "ui-server"
-        if gen_script.exists() and ui_server_dir.exists():
-            print("generating typescript types from pydantic models")
-            result = subprocess.run(
-                [sys.executable, str(gen_script)], cwd=str(repo_root)
-            )
-            if result.returncode != 0:
-                raise typer.Exit(result.returncode)
 
     if target in {"all", "zig"}:
         print("compiling zig")
@@ -211,36 +155,15 @@ def compile(
 
         _ = faebryk.core.zig
 
-    if target in {"all", "visualizer"}:
-        print("compiling visualizer")
-        repo_root = Path(__file__).resolve().parents[3]
-        viz_dir = repo_root / "src" / "atopile" / "visualizer" / "web"
-        if not viz_dir.exists():
-            raise FileNotFoundError(f"visualizer web directory not found: {viz_dir}")
-
-        node_modules = viz_dir / "node_modules"
-        if not node_modules.exists():
-            subprocess.run([_npm, "install"], cwd=viz_dir, check=True)
-
-        subprocess.run([_npm, "run", "build"], cwd=viz_dir, check=True)
-
     if target in {"all", "vscode"}:
         print("compiling vscode extension")
-        repo_root = Path(__file__).resolve().parents[3]
-        vscode_dir = repo_root / "src" / "vscode-atopile"
-        if not vscode_dir.exists():
-            raise FileNotFoundError(
-                f"vscode extension directory not found: {vscode_dir}"
-            )
+        workspace_root = _dev_workspace_root()
+        package_dirs = _frontend_package_dirs(workspace_root)
+        vscode_dir = package_dirs["VS Code extension"]
+        layout_frontend_dir = package_dirs["layout editor"]
 
-        node_modules = vscode_dir / "node_modules"
-        package_lock = vscode_dir / "package-lock.json"
-        needs_install = not node_modules.exists() or (
-            package_lock.exists()
-            and package_lock.stat().st_mtime > node_modules.stat().st_mtime
-        )
-        if needs_install:
-            subprocess.run([_npm, "install"], cwd=vscode_dir, check=True)
+        bun = _get_bun()
+        _sync_frontend_dependencies(bun, package_dirs)
 
         # Update version with the installed `atopile` version for dev builds.
         package_json_path = vscode_dir / "package.json"
@@ -248,7 +171,6 @@ def compile(
         original_version = package_json["version"]
         dev_version = _get_compiler_version_for_extension()
         if dev_version is None:
-            # Preserve existing behavior when metadata isn't available.
             dev_version = f"{original_version}-dev.{int(time.time())}"
             print(
                 "Warning: could not read installed atopile version; using fallback"
@@ -259,9 +181,16 @@ def compile(
         print(f"version: {dev_version}")
 
         try:
-            # Package the extension (vscode:prepublish builds dashboard + extension)
+            _build_frontend_bundles(bun, vscode_dir, layout_frontend_dir)
             subprocess.run(
-                [_npm, "exec", "--", "vsce", "package", "--allow-missing-repository"],
+                [
+                    bun,
+                    "run",
+                    "vsce",
+                    "package",
+                    "--allow-missing-repository",
+                    "--no-dependencies",
+                ],
                 cwd=vscode_dir,
                 check=True,
             )
@@ -304,8 +233,8 @@ def install(
         )
         raise typer.Exit(1)
 
-    repo_root = Path(__file__).resolve().parents[3]
-    vscode_dir = repo_root / "src" / "vscode-atopile"
+    workspace_root = _dev_workspace_root()
+    vscode_dir = workspace_root / "src" / "vscode-atopile"
 
     if not vscode_dir.exists():
         raise typer.BadParameter(f"vscode extension directory not found: {vscode_dir}")
@@ -323,7 +252,6 @@ def install(
     print(f"Installing {vsix_file.name} using {cli}...")
 
     # Install with --force to replace existing installation
-    # This triggers VS Code's "Reload Required" notification
     result = subprocess.run(
         [cli, "--install-extension", str(vsix_file), "--force"],
         capture_output=True,
@@ -341,93 +269,95 @@ def install(
 
 
 @dev_app.command()
-@capture("cli:dev_ui_start", "cli:dev_ui_end")
-def ui(
-    open_browser: bool = typer.Option(
-        True, help="Open the showcase in the default browser."
-    ),
-    port: int = typer.Option(5173, "--port", help="Vite dev server port."),
-    skip_install: bool = typer.Option(
-        False, "--skip-install", help="Skip npm install check."
+@capture("cli:dev_extension_start", "cli:dev_extension_end")
+def extension(
+    no_install: bool = typer.Option(
+        False, "--no-install", help="Skip bun install step"
     ),
 ):
+    """Launch VS Code Extension Development Host with watchers.
+
+    Builds and watches extension, webview, and layout editor bundles with bun, then
+    opens a new VS Code window in Extension Development Host mode.
     """
-    Launch the shared component showcase in a browser.
+    root = _dev_workspace_root()
+    package_dirs = _frontend_package_dirs(root)
+    ext_dir = package_dirs["VS Code extension"]
+    layout_frontend_dir = package_dirs["layout editor"]
 
-    Starts the Vite dev server for ui-server and opens the showcase page.
-    """
-    import socket
-    import time
+    # Validate directories exist
+    if not ext_dir.is_dir():
+        raise typer.BadParameter(f"Extension directory not found: {ext_dir}")
 
-    repo_root = Path(__file__).resolve().parents[3]
-    ui_server_dir = repo_root / "src" / "ui-server"
+    bun = _get_bun()
 
-    if not ui_server_dir.exists():
-        raise FileNotFoundError(f"ui-server directory not found: {ui_server_dir}")
-
-    if not skip_install and not (ui_server_dir / "node_modules").exists():
-        print("Installing ui-server dependencies...")
-        subprocess.run([_npm, "install"], cwd=ui_server_dir, check=True)
-
-    showcase_url = f"http://localhost:{port}/showcase.html"
-
-    # Check if the dev server is already running on the port.
-    # Vite may bind IPv4 or IPv6 depending on the platform, so try both.
-    def _port_open() -> bool:
-        for af, addr in [(socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")]:
-            try:
-                with socket.socket(af, socket.SOCK_STREAM) as s:
-                    s.settimeout(0.3)
-                    if s.connect_ex((addr, port)) == 0:
-                        return True
-            except OSError:
-                continue
-        return False
-
-    server_proc = None
-    if not _port_open():
-        print(f"Starting Vite dev server on port {port}...")
-        env = os.environ.copy()
-        env["BROWSER"] = "none"  # prevent Vite's own auto-open
-        server_proc = subprocess.Popen(
-            [_npm, "run", "dev", "--", "--port", str(port)],
-            cwd=ui_server_dir,
-            env=env,
+    # Check code CLI is available
+    code_bin = shutil.which("code")
+    if not code_bin:
+        typer.secho(
+            "VS Code 'code' CLI not found. Install from VS Code command palette: "
+            "'Shell Command: Install code command in PATH'",
+            fg=typer.colors.RED,
         )
-        # Wait for the server to be ready
-        for _ in range(30):
-            if _port_open():
-                break
+        raise typer.Exit(1)
+
+    # Install dependencies
+    if not no_install:
+        _sync_frontend_dependencies(bun, package_dirs)
+
+    # Build frontend bundles so there are fresh assets to load.
+    _build_frontend_bundles(bun, ext_dir, layout_frontend_dir)
+
+    procs: list[subprocess.Popen] = []
+
+    def cleanup(_signum=None, _frame=None):
+        for p in procs:
+            try:
+                p.terminate()
+            except OSError:
+                pass
+        for p in procs:
+            try:
+                p.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                p.kill()
+
+    signal.signal(signal.SIGTERM, cleanup)
+
+    try:
+        # Start watchers for extension/webview and the layout editor frontend.
+        typer.echo("Starting watchers...")
+        procs.append(subprocess.Popen([bun, "run", "watch"], cwd=ext_dir))
+        procs.append(subprocess.Popen([bun, "run", "watch"], cwd=layout_frontend_dir))
+
+        # Give watchers a moment to produce initial output
+        time.sleep(2)
+
+        # Launch VS Code Extension Development Host
+        typer.echo("Launching VS Code Extension Development Host...")
+        subprocess.Popen(
+            [
+                code_bin,
+                "--new-window",
+                "--extensionDevelopmentPath",
+                str(ext_dir),
+                str(Path.cwd()),
+            ],
+        )
+
+        typer.echo("\nDev environment running. Press Ctrl+C to stop.")
+
+        # Block until a watcher exits or user interrupts
+        while True:
+            for p in procs:
+                if p.poll() is not None:
+                    raise typer.Exit(p.returncode or 0)
             time.sleep(0.5)
-        else:
-            typer.secho("Vite dev server did not start in time.", fg=typer.colors.RED)
-            if server_proc.poll() is None:
-                server_proc.terminate()
-            raise typer.Exit(1)
-    else:
-        print(f"Vite dev server already running on port {port}.")
 
-    # Open the showcase
-    if open_browser:
-        webbrowser.open(showcase_url)
-
-    if server_proc is not None:
-        print(f"\nShowcase running at {showcase_url}")
-        print("Press Ctrl+C to stop the dev server.")
-        try:
-            server_proc.wait()
-        except KeyboardInterrupt:
-            pass
-        finally:
-            if server_proc.poll() is None:
-                server_proc.terminate()
-                try:
-                    server_proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    server_proc.kill()
-                    server_proc.wait()
-    else:
-        print(f"Opened {showcase_url}")
+    except KeyboardInterrupt:
+        typer.echo("\nShutting down...")
+    finally:
+        cleanup()
 
 
 @dev_app.command()
@@ -441,7 +371,7 @@ def worktree(
         None,
         "--branch",
         "-b",
-        help="Branch to use. Defaults to the suffix. "
+        help="Branch to use. Defaults to feature/<suffix>. "
         "If it exists on origin, a local tracking branch is created.",
     ),
     path: Path | None = typer.Option(
@@ -501,9 +431,11 @@ def worktree(
         return
 
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        shell_name = Path(os.environ.get("SHELL", "sh")).name
+        activate_name, _ = _SHELL_ACTIVATE.get(shell_name, _DEFAULT_ACTIVATE)
         typer.echo(
             f"Skipping shell handoff (non-interactive). "
-            f"Use: cd {worktree_path} && source .venv/bin/activate"
+            f"Use: cd {worktree_path} && source .venv/bin/{activate_name}"
         )
         return
 
@@ -514,9 +446,11 @@ def worktree(
     try:
         _spawn_shell_with_venv(worktree_path)
     except Exception as e:
+        shell_name = Path(os.environ.get("SHELL", "sh")).name
+        activate_name, _ = _SHELL_ACTIVATE.get(shell_name, _DEFAULT_ACTIVATE)
         typer.secho(
             f"Error spawning shell: {e}. "
-            f"Use: cd {worktree_path} && source .venv/bin/activate",
+            f"Use: cd {worktree_path} && source .venv/bin/{activate_name}",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
@@ -625,13 +559,12 @@ def flags():
 
         return re.sub(url_pattern, replace_url, text)
 
-    roots = [Path("src/atopile"), Path("src/faebryk")]
-    here = Path.cwd()
-    if not all((here / p).is_dir() for p in roots):
+    workspace_root = _dev_workspace_root()
+    roots = [workspace_root / "src" / "atopile", workspace_root / "src" / "faebryk"]
+    if not all(root.is_dir() for root in roots):
         raise FileNotFoundError(
-            f"This command must be run from the '/atopile' folder, not from [{here}]."
+            f"Could not find config flag roots under [{workspace_root}]."
         )
-    roots = [here / p for p in roots]
     discovered = discover_configflags(*roots)
     uses_by_def = _count_callsites(discovered, roots=roots)
 
@@ -888,13 +821,9 @@ def test(
         help="Keep the live report server running after tests finish",
     ),
 ):
-    import sys
-
-    from faebryk.libs.util import repo_root
-
     # Handle --list-baselines option: list and exit
     if list_baselines:
-        sys.path.insert(0, str(repo_root()))
+        _prepend_dev_import_paths()
         from test.runner.baselines import list_local_baselines
 
         baselines = list_local_baselines()
@@ -930,7 +859,7 @@ def test(
         _fetch_and_open_test_report(commit_ref)
         return
 
-    sys.path.insert(0, str(repo_root()))
+    _prepend_dev_import_paths()
 
     # Convert number to HEAD~N format (e.g. "3" -> "HEAD~3")
     baseline_commit = baseline
@@ -990,29 +919,13 @@ def test(
 
     from test.runner.main import main
 
-    # Build the log viewer UI before starting tests
-    ui_server_dir = repo_root() / "src" / "ui-server"
-    if LOG_VIEWER and ui_server_dir.exists():
-        node_modules = ui_server_dir / "node_modules"
-        if not node_modules.exists():
-            typer.echo("Installing log viewer dependencies...")
-            subprocess.run([_npm, "install"], cwd=ui_server_dir, check=True)
-        typer.echo("Building log viewer UI...")
-        result = subprocess.run(
-            [shutil.which("npx") or "npx", "vite", "build"],
-            cwd=ui_server_dir,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            typer.echo(f"Warning: Failed to build log viewer: {result.stderr[:200]}")
-
     args = ctx.args
 
     if ci:
         if "-m" in args:
             raise NotImplementedError("CI mode does not support -m")
-        args.extend(["-m", "not not_in_ci and not regression and not slow"])
+        args.extend(["-m", "not (not_in_ci or regression or slow or full_solver_only)"])
+        os.environ.setdefault("FBRK_SKIP_EASYEDA", "1")
     if test_name:
         args.extend(["-k", test_name])
 
@@ -1032,11 +945,7 @@ def test(
 def profile(
     ctx: typer.Context,
 ):
-    import sys
-
-    from faebryk.libs.util import repo_root
-
-    sys.path.insert(0, str(repo_root()))
+    _prepend_dev_import_paths()
     from tools.profile import app
 
     sys.argv = ["", *ctx.args]
@@ -1047,10 +956,15 @@ def profile(
 def clear_logs(
     ctx: typer.Context,
 ):
-    """Remove all log databases."""
-    from faebryk.libs.paths import remove_log_dir
+    """Reset and recreate all log databases."""
+    from atopile.model.sqlite import (
+        delete_log_storage,
+        initialize_log_storage,
+    )
 
-    if remove_log_dir():
+    try:
+        delete_log_storage()
+        initialize_log_storage()
         typer.echo("🧹 Log databases removed 🧹")
-    else:
+    except Exception:
         typer.echo("❌ Could not remove log databases")

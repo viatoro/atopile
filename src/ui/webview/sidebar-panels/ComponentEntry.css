@@ -1,0 +1,226 @@
+.component-entry-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-inline: calc(var(--spacing-xs) * -1);
+  container-type: inline-size;
+}
+
+.component-entry-row {
+  appearance: none;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0;
+  padding: 0;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 68%, transparent);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.component-entry-row:first-child {
+  border-top: 1px solid color-mix(in srgb, var(--border-subtle) 100%, transparent);
+  margin-top: -1px;
+}
+
+.component-entry-row[role="button"] {
+  cursor: pointer;
+}
+
+.component-entry-row[role="button"]:hover {
+  background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 72%, transparent);
+}
+
+.component-entry-row[role="button"]:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, var(--border-subtle));
+  outline-offset: -1px;
+}
+
+/* ---- Icon column ---- */
+
+.component-entry-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  min-height: 52px;
+  padding: 8px;
+  color: var(--text-primary);
+  transition: color var(--transition-fast), transform var(--transition-fast);
+}
+
+.component-entry-row[role="button"]:hover .component-entry-mark {
+  color: var(--accent);
+  transform: translateX(1px);
+}
+
+/* ---- Body column (two rows) ---- */
+
+.component-entry-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 8px 12px 8px 10px;
+}
+
+.component-entry-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.component-entry-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.component-entry-description {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.component-entry-detail {
+  flex-shrink: 0;
+  font-size: var(--font-size-xxs);
+  line-height: 1.25;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ---- Actions column ---- */
+
+.component-entry-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0 12px 0 8px;
+}
+
+.component-entry-actions .spinner {
+  flex-shrink: 0;
+}
+
+.component-entry-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: none;
+  background: transparent;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--success);
+}
+
+.component-entry-icon-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+button.component-entry-icon-action {
+  cursor: pointer;
+}
+
+button.component-entry-icon-action:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.component-entry-icon-action.install {
+  color: var(--ato-orange);
+}
+
+.component-entry-icon-action.install:hover {
+  background: color-mix(in srgb, var(--ato-orange) 12%, transparent);
+  color: var(--ato-orange);
+}
+
+.component-entry-installed-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--success);
+  width: 32px;
+  height: 32px;
+  line-height: 0;
+}
+
+/* Compact/full action toggle for narrow widths */
+.action-compact {
+  display: none;
+}
+
+@container (max-width: 360px) {
+  .action-full {
+    display: none;
+  }
+  .action-compact {
+    display: inline-flex;
+  }
+}
+
+/* ---- Meta (optional) ---- */
+
+/* ---- Chevron (library expandable rows) ---- */
+
+.component-entry-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  justify-self: end;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  margin: 0 12px 0 8px;
+  line-height: 0;
+  color: var(--text-muted);
+  transform-origin: center center;
+  transition: transform var(--transition-fast), color var(--transition-fast);
+}
+
+.component-entry-chevron svg {
+  display: block;
+}
+
+.component-entry-chevron.expanded {
+  transform: rotate(90deg);
+}

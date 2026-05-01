@@ -10,6 +10,7 @@ import faebryk.core.faebrykpy as fbrk
 import faebryk.core.graph as graph
 import faebryk.core.node as fabll
 import faebryk.library._F as F
+from faebryk.core.solver.DiscreteSystem import DiscreteSystem
 from faebryk.libs.util import not_none
 
 logger = logging.getLogger(__name__)
@@ -123,96 +124,48 @@ class ResistorVoltageDivider(fabll.Node):
         ),
     ]
 
-    # Link interface voltages to parameters
-    _equations = [
-        F.Expressions.Is.MakeChild(
-            [total_resistance],
-            [chain, _ResistorChain.total_resistance],
-            assert_=True,
-        ),
-        F.Expressions.Is.MakeChild(
-            [ratio],
-            [
-                _r_div := F.Expressions.Divide.MakeChild(
-                    [chain, _ResistorChain.resistors[1], F.Resistor.resistance],
-                    [total_resistance],
-                )
-            ],
-            [
-                _v_div := F.Expressions.Divide.MakeChild(
-                    [v_out],
-                    [v_in],
-                )
-            ],
-            assert_=True,
-        ),
-        F.Expressions.Is.MakeChild(
-            [current],
-            [
-                _v_r_div := F.Expressions.Divide.MakeChild(
-                    [v_in],
-                    [total_resistance],
-                )
-            ],
-            assert_=True,
-        ),
-    ]
+    # The coupled resistor values are solved as a discrete system.
+    _total_resistance_eq = F.Expressions.Is.MakeChild(
+        [total_resistance],
+        [chain, _ResistorChain.total_resistance],
+        assert_=True,
+    )
+    _ratio_eq = F.Expressions.Is.MakeChild(
+        [ratio],
+        [
+            _r_div := F.Expressions.Divide.MakeChild(
+                [chain, _ResistorChain.resistors[1], F.Resistor.resistance],
+                [total_resistance],
+            )
+        ],
+        [
+            _v_div := F.Expressions.Divide.MakeChild(
+                [v_out],
+                [v_in],
+            )
+        ],
+        assert_=True,
+    )
+    _current_eq = F.Expressions.Is.MakeChild(
+        [current],
+        [
+            _v_r_div := F.Expressions.Divide.MakeChild(
+                [v_in],
+                [total_resistance],
+            )
+        ],
+        assert_=True,
+    )
 
-    # helper equations for the solver
-    _rewrite_equations = [
-        F.Expressions.Is.MakeChild(
-            [total_resistance],
-            [
-                _v_i_div := F.Expressions.Divide.MakeChild(
-                    [v_in],
-                    [current],
-                )
-            ],
-            assert_=True,
-        ),
-        F.Expressions.Is.MakeChild(
-            [chain, _ResistorChain.resistors[1], F.Resistor.resistance],
-            [
-                _ratio_r_mul := F.Expressions.Multiply.MakeChild(
-                    [ratio],
-                    [total_resistance],
-                )
-            ],
-            assert_=True,
-        ),
-        # total_R = r_bottom / ratio (inverse for backward propagation)
-        F.Expressions.Is.MakeChild(
-            [total_resistance],
-            [
-                _total_r_from_r1_ratio := F.Expressions.Divide.MakeChild(
-                    [chain, _ResistorChain.resistors[1], F.Resistor.resistance],
-                    [ratio],
-                )
-            ],
-            assert_=True,
-        ),
-        # r_top = total_R - r_bottom
-        F.Expressions.Is.MakeChild(
+    discrete_system = DiscreteSystem.MakeChild(
+        unknowns=[
             [chain, _ResistorChain.resistors[0], F.Resistor.resistance],
-            [
-                _r_top_sub := F.Expressions.Subtract.MakeChild(
-                    [total_resistance],
-                    [chain, _ResistorChain.resistors[1], F.Resistor.resistance],
-                )
-            ],
-            assert_=True,
-        ),
-        F.Expressions.Is.MakeChild(
             [chain, _ResistorChain.resistors[1], F.Resistor.resistance],
-            [
-                _r_bot_sub := F.Expressions.Subtract.MakeChild(
-                    [total_resistance],
-                    [chain, _ResistorChain.resistors[0], F.Resistor.resistance],
-                )
-            ],
-            assert_=True,
-        ),
-    ]
+        ],
+        objective=[ratio],
+        objective_mode=DiscreteSystem.ObjectiveMode.target_center,
+        assert_=True,
+    )
 
     _net_name = fabll.Traits.MakeEdge(
         F.has_net_name_suggestion.MakeChild(
@@ -222,8 +175,8 @@ class ResistorVoltageDivider(fabll.Node):
     )
 
 
+@pytest.mark.full_solver_only
 class TestVdivSolver:
-    @pytest.mark.slow
     @pytest.mark.usefixtures("setup_project_config")
     @staticmethod
     def test_pick_adc_vdiv():
@@ -251,7 +204,7 @@ class TestVdivSolver:
              = {4.95kOhm..10.1kOhm} - {1.47kOhm..3.26kOhm}
              = {1.685kOhm..8.63kOhm}
         """
-        from faebryk.core.solver.solver import Solver
+        from faebryk.core.solver import Solver
         from faebryk.libs.picker.picker import pick_parts_recursively
         from faebryk.libs.test.boundexpressions import BoundExpressions
 
@@ -288,10 +241,8 @@ class TestVdivSolver:
         )
 
         F.is_alias_bus_parameter.resolve_bus_parameters(g=g, tg=tg)
-        solver = Solver()
-        solver.simplify(g=g, tg=tg)
 
-        r_top = solver.extract_superset(
+        r_top_p = (
             app.rdiv.get()
             .chain.get()
             .resistors[0]
@@ -300,8 +251,7 @@ class TestVdivSolver:
             .is_parameter_operatable.get()
             .as_parameter.force_get()
         )
-
-        r_bottom = solver.extract_superset(
+        r_bottom_p = (
             app.rdiv.get()
             .chain.get()
             .resistors[1]
@@ -310,6 +260,11 @@ class TestVdivSolver:
             .is_parameter_operatable.get()
             .as_parameter.force_get()
         )
+        solver = Solver()
+        solver.simplify_for(r_top_p, r_bottom_p)
+
+        r_top = solver.extract_superset(r_top_p)
+        r_bottom = solver.extract_superset(r_bottom_p)
 
         print("Top:", r_top.pretty_str())
         print("Bottom:", r_bottom.pretty_str())
@@ -335,11 +290,15 @@ class TestVdivSolver:
             f"r_bottom {r_bottom} not in expected range {expected_r_bottom}"
         )
 
-        solved_ratio = solver.extract_superset(
-            app.rdiv.get()
-            .ratio.get()
-            .is_parameter_operatable.get()
-            .as_parameter.force_get()
+        # Compute achieved ratio from solved resistances: r_bottom / (r_top + r_bottom)
+        r_top_nums = not_none(
+            fabll.Traits(r_top).get_obj_raw().try_cast(F.Literals.Numbers)
+        )
+        r_bottom_nums = not_none(
+            fabll.Traits(r_bottom).get_obj_raw().try_cast(F.Literals.Numbers)
+        )
+        solved_ratio = r_bottom_nums.op_div_intervals(
+            r_top_nums.op_add_intervals(r_bottom_nums, g=g, tg=tg), g=g, tg=tg
         )
 
         # Expected ratio from voltage constraints: v_out / v_in = {3.0..3.2}/{9.9..10.1}
@@ -366,11 +325,10 @@ class TestVdivSolver:
         assert r_top_node.has_trait(F.Pickable.has_part_picked)
         assert r_bottom_node.has_trait(F.Pickable.has_part_picked)
 
-    @pytest.mark.slow
     @pytest.mark.usefixtures("setup_project_config")
     @staticmethod
     def test_pick_dependency_advanced_1():
-        from faebryk.core.solver.solver import Solver
+        from faebryk.core.solver import Solver
         from faebryk.libs.picker.picker import pick_parts_recursively
         from faebryk.libs.test.boundexpressions import BoundExpressions
 
@@ -393,11 +351,10 @@ class TestVdivSolver:
         solver = Solver()
         pick_parts_recursively(rdiv, solver)
 
-    @pytest.mark.slow
     @pytest.mark.usefixtures("setup_project_config")
     @staticmethod
     def test_pick_dependency_advanced_2():
-        from faebryk.core.solver.solver import Solver
+        from faebryk.core.solver import Solver
         from faebryk.libs.picker.picker import pick_parts_recursively
         from faebryk.libs.test.boundexpressions import BoundExpressions
 
@@ -429,7 +386,7 @@ class TestVdivSolver:
     @pytest.mark.usefixtures("setup_project_config")
     @staticmethod
     def test_pick_dependency_div_negative():
-        from faebryk.core.solver.solver import Solver
+        from faebryk.core.solver import Solver
         from faebryk.libs.picker.picker import pick_parts_recursively
         from faebryk.libs.test.boundexpressions import BoundExpressions
 
@@ -457,14 +414,13 @@ class TestVdivSolver:
         solver = Solver()
         pick_parts_recursively(rdiv, solver)
 
-    @pytest.mark.slow
     @pytest.mark.usefixtures("setup_project_config")
     @staticmethod
     def test_ato_pick_resistor_voltage_divider_ato(tmp_path: Path):
         import textwrap
 
         from atopile.compiler.build import Linker, StdlibRegistry, build_file
-        from faebryk.core.solver.solver import Solver
+        from faebryk.core.solver import Solver
         from faebryk.libs.picker.picker import pick_parts_recursively
 
         # Note: Using ResistorVoltageDivider directly instead of inheriting
@@ -516,14 +472,13 @@ class TestVdivSolver:
         assert r_top.has_trait(F.Pickable.has_part_picked)
         assert r_bottom.has_trait(F.Pickable.has_part_picked)
 
-    @pytest.mark.slow
     @pytest.mark.usefixtures("setup_project_config")
     @staticmethod
     def test_ato_pick_resistor_voltage_divider_fab():
         import textwrap
 
         from atopile.compiler.build import Linker, StdlibRegistry, build_source
-        from faebryk.core.solver.solver import Solver
+        from faebryk.core.solver import Solver
         from faebryk.libs.picker.picker import pick_parts_recursively
         from faebryk.libs.test.boundexpressions import BoundExpressions
 

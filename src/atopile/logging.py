@@ -14,13 +14,14 @@ import os
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterable
+import traceback
+from collections.abc import Callable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from types import ModuleType, TracebackType
+from types import TracebackType
 from typing import Any
 
 from rich.console import Console, ConsoleRenderable
@@ -29,9 +30,7 @@ from rich.markdown import Markdown
 from rich.text import Text
 from rich.traceback import Traceback
 
-import atopile
-import faebryk
-from atopile.dataclasses import (
+from atopile.data_models import (
     Log,
     LogRow,
     TestLogRow,
@@ -62,6 +61,15 @@ class _RecordMeta:
     objects: dict | None = None
 
 
+@dataclass(frozen=True)
+class _RuntimeLoggingConfig:
+    """Resolved logging behavior for the current process runtime."""
+
+    use_plain_console_logs: bool
+    plain_log_prefix: str
+    plain_console: Console
+
+
 _record_meta: ContextVar[_RecordMeta] = ContextVar(
     "record_meta",
     default=_RecordMeta(),
@@ -82,14 +90,42 @@ _LEVEL_MAP = {
 }
 
 
-def _is_serving() -> bool:
-    """Check if we're running the server."""
+def _detect_runtime_logging_config() -> _RuntimeLoggingConfig:
+    """Resolve process logging behavior once at import time."""
+    argv = tuple(sys.argv)
     main = sys.modules.get("__main__")
-    return (
-        "serve" in sys.argv
-        or "atopile.server" in sys.argv
+
+    is_serving = (
+        "serve" in argv
+        or "atopile.server" in argv
         or (main is not None and main.__package__ == "atopile.server")
     )
+    is_lsp = "lsp" in argv
+
+    return _RuntimeLoggingConfig(
+        use_plain_console_logs=is_serving or is_lsp,
+        plain_log_prefix="LSP: " if is_lsp else "",
+        plain_console=error_console if is_lsp else console,
+    )
+
+
+_RUNTIME_LOGGING = _detect_runtime_logging_config()
+
+
+def _use_plain_console_logs() -> bool:
+    return _RUNTIME_LOGGING.use_plain_console_logs
+
+
+def _plain_log_prefix() -> str:
+    return _RUNTIME_LOGGING.plain_log_prefix
+
+
+def _plain_log_timestamp(record: logging.LogRecord) -> str:
+    return datetime.fromtimestamp(record.created).strftime("%H:%M:%S.%f")[:-3]
+
+
+def _plain_log_level(record: logging.LogRecord) -> str:
+    return record.levelname.lower()
 
 
 class AtoLogger(logging.Logger):
@@ -574,13 +610,14 @@ class AtoLogger(logging.Logger):
         prev_active_build = cls._active_build_logger
         prev_active_test = cls._active_test_logger
         prev_active_unscoped = cls._active_unscoped_logger
+        preserved_test_logger = prev_active_test if kind is None else None
 
         if reset_root:
             root.handlers = []
             root.setLevel(logging.WARNING)
 
         cls._active_build_logger = None
-        cls._active_test_logger = None
+        cls._active_test_logger = preserved_test_logger
         cls._active_unscoped_logger = None
 
         if kind is not None:
@@ -657,60 +694,34 @@ def scope(msg: str | None = None):
 
 
 LOGS_DEFAULT_COUNT = 500
-LOGS_MAX_COUNT = 5000
 
 
-def normalize_log_levels(value: Any) -> list[str] | None:
-    """Normalize log level filters to the uppercase Log.Level enum values."""
-    if not isinstance(value, list):
-        return None
-    allowed = {member.value for member in Log.Level}
-    normalized: list[str] = []
-    for entry in value:
-        if not isinstance(entry, str):
-            return None
-        level = entry.strip().upper()
-        if level not in allowed:
-            return None
-        normalized.append(level)
-    return normalized
-
-
-def normalize_log_audience(value: Any) -> str | None:
-    """Normalize audience filters to the lowercase Log.Audience enum values."""
-    if not isinstance(value, str):
-        return None
-    audience = value.strip().lower()
-    return audience if audience in {member.value for member in Log.Audience} else None
-
-
-def _strip_stream_id(entry: dict[str, Any]) -> dict[str, Any]:
-    if "id" not in entry:
-        return entry
-    return {k: v for k, v in entry.items() if k != "id"}
-
-
-def load_build_logs(
+def read_build_logs(
     *,
     build_id: str,
-    stage: str | None,
-    log_levels: list[str] | None,
-    audience: str | None,
-    count: int,
-) -> list[dict[str, Any]]:
-    """Load a bounded batch of build logs for one-shot tool responses."""
+    stage: str | None = None,
+    log_levels: list[str] | None = None,
+    audience: str | None = None,
+    after_id: int = 0,
+    count: int = LOGS_DEFAULT_COUNT,
+    order: str = "DESC",
+    include_id: bool = False,
+) -> tuple[list[dict[str, Any]], int]:
+    """Read build logs with shared filtering and id handling."""
     from atopile.model.sqlite import Logs
 
-    rows, _ = Logs.fetch_chunk(
+    rows, last_id = Logs.fetch_chunk(
         build_id,
         stage=stage,
         levels=log_levels,
         audience=audience,
-        after_id=0,
-        count=max(1, min(count, LOGS_MAX_COUNT)),
-        order="DESC",
+        after_id=after_id,
+        count=max(1, count),
+        order=order,
     )
-    return [_strip_stream_id(row) for row in rows]
+    if include_id:
+        return rows, last_id
+    return [{k: v for k, v in row.items() if k != "id"} for row in rows], last_id
 
 
 # =============================================================================
@@ -718,8 +729,8 @@ def load_build_logs(
 # =============================================================================
 
 
-class ConsoleLogHandler(RichHandler):
-    """Rich console handler with custom prefix formatting and traceback handling."""
+class BaseConsoleLogHandler(RichHandler):
+    """Shared console logging behavior for Rich and plain-text handlers."""
 
     def __init__(
         self,
@@ -727,10 +738,6 @@ class ConsoleLogHandler(RichHandler):
         console: Console,
         rich_tracebacks: bool = True,
         show_path: bool = False,
-        tracebacks_suppress: Iterable[str] | None = None,
-        tracebacks_suppress_map: (
-            dict[type[BaseException], Iterable[ModuleType]] | None
-        ) = None,
         tracebacks_unwrap: list[type[BaseException]] | None = None,
         hide_traceback_types: tuple[type[BaseException], ...] | None = None,
         always_show_traceback_types: tuple[type[BaseException], ...] = (
@@ -749,10 +756,6 @@ class ConsoleLogHandler(RichHandler):
             show_level=False,
             **kwargs,
         )
-        self.tracebacks_suppress = list(tracebacks_suppress or ["typer"])
-        self.tracebacks_suppress_map = tracebacks_suppress_map or {
-            UserPythonModuleError: [atopile, faebryk]
-        }
         self.tracebacks_unwrap = tracebacks_unwrap or [UserPythonModuleError]
         if hide_traceback_types is None:
             from atopile.compiler import DslRichException
@@ -761,17 +764,6 @@ class ConsoleLogHandler(RichHandler):
         self.hide_traceback_types = hide_traceback_types
         self.always_show_traceback_types = always_show_traceback_types
         self.traceback_level = traceback_level
-        self._is_terminal = force_terminal or console.is_terminal
-
-    def _get_suppress(
-        self, exc_type: type[BaseException] | None
-    ) -> list[str | ModuleType]:
-        suppress: set[str | ModuleType] = set(self.tracebacks_suppress)
-        if exc_type:
-            for t, mods in self.tracebacks_suppress_map.items():
-                if issubclass(exc_type, t) or isinstance(exc_type, t):
-                    suppress.update(mods)
-        return list(suppress)
 
     def _unwrap_chain(
         self,
@@ -787,7 +779,9 @@ class ConsoleLogHandler(RichHandler):
                 exc_tb = exc_value.__traceback__
         return exc_type, exc_value, exc_tb
 
-    def _get_traceback(self, record: logging.LogRecord) -> Traceback | None:
+    def _get_exception_info(
+        self, record: logging.LogRecord
+    ) -> tuple[type[BaseException], BaseException, TracebackType | None] | None:
         if not record.exc_info:
             return None
         exc_type, exc_value, exc_tb = record.exc_info
@@ -801,13 +795,55 @@ class ConsoleLogHandler(RichHandler):
         hide = is_hidden_type or record.levelno < self.traceback_level
         if hide or not exc_type or not exc_value:
             return None
+        return exc_type, exc_value, exc_tb
 
-        # Use console width or None (unlimited) to avoid truncating tracebacks
+    def _format_message(self, record: logging.LogRecord) -> str:
+        scope_level = _log_scope_level.get()
+        scope_prefix = "·" * scope_level if scope_level > 0 else ""
+
+        if self.formatter:
+            record.message = record.getMessage()
+            if hasattr(self.formatter, "usesTime") and self.formatter.usesTime():
+                record.asctime = self.formatter.formatTime(
+                    record, self.formatter.datefmt
+                )
+            message = self.formatter.formatMessage(record)
+        else:
+            message = record.getMessage()
+
+        if scope_prefix:
+            message = f"{scope_prefix}{message}"
+        return message
+
+    def _prepare_emit(
+        self, record: logging.LogRecord
+    ) -> tuple[
+        str,
+        tuple[type[BaseException], BaseException, TracebackType | None] | None,
+    ]:
+        return self._format_message(record), self._get_exception_info(record)
+
+
+class RichConsoleLogHandler(BaseConsoleLogHandler):
+    """Rich console handler with custom prefix formatting and traceback handling."""
+
+    def __init__(self, *args, console: Console, force_terminal: bool = False, **kwargs):
+        super().__init__(
+            *args, console=console, force_terminal=force_terminal, **kwargs
+        )
+        self._is_terminal = force_terminal or console.is_terminal
+
+    def _get_traceback(
+        self,
+        exc_info: tuple[type[BaseException], BaseException, TracebackType | None]
+        | None,
+    ) -> Traceback | None:
+        if exc_info is None:
+            return None
+        exc_type, exc_value, exc_tb = exc_info
         width = getattr(self, "tracebacks_width", None) or getattr(
             self.console, "width", None
         )
-        # If width is None, Rich will use full available width
-
         return Traceback.from_exception(
             exc_type,
             exc_value,
@@ -819,10 +855,7 @@ class ConsoleLogHandler(RichHandler):
             show_locals=getattr(self, "tracebacks_show_locals", False),
             locals_max_length=getattr(self, "locals_max_length", 10),
             locals_max_string=getattr(self, "locals_max_string", 80),
-            max_frames=getattr(
-                self, "tracebacks_max_frames", 100
-            ),  # Reduced from 1000 - syntax highlighting is slow with many frames
-            suppress=self._get_suppress(exc_type),
+            max_frames=getattr(self, "tracebacks_max_frames", 100),
         )
 
     def render_message(
@@ -850,7 +883,7 @@ class ConsoleLogHandler(RichHandler):
             logger_name = "…" + logger_name[-17:]
         logger_name = f"{logger_name:<18}"
 
-        if not self._is_terminal or _is_serving():
+        if not self._is_terminal or _use_plain_console_logs():
             prefix_parts: list[str] = []
             if source_id:
                 prefix_parts.append(f"[{source_id}]")
@@ -896,52 +929,46 @@ class ConsoleLogHandler(RichHandler):
         return table
 
     def emit(self, record: logging.LogRecord) -> None:
-        # Scope prefix for tree visualization
-        scope_level = _log_scope_level.get()
-        scope_prefix = "·" * scope_level if scope_level > 0 else ""
-
-        tb = self._get_traceback(record)
-        if self.formatter:
-            record.message = record.getMessage()
-            if hasattr(self.formatter, "usesTime") and self.formatter.usesTime():
-                record.asctime = self.formatter.formatTime(
-                    record, self.formatter.datefmt
-                )
-            message = self.formatter.formatMessage(record)
-        else:
-            message = record.getMessage()
-
-        if scope_prefix:
-            message = f"{scope_prefix}{message}"
-
-        if _is_serving():
-            # VSCode Output should be plain text to avoid forced wrapping.
-            from rich.text import Text
-
-            plain = Text.from_ansi(message.replace("\r", "")).plain
-            target = (
-                error_console.file
-                if (record.levelno >= logging.ERROR and record.exc_info)
-                else self.console.file
-            )
-            target.write(plain + "\n")
-            target.flush()
-            return
-
+        message, exc_info = self._prepare_emit(record)
         renderable = self.render(
             record=record,
-            traceback=tb,
+            traceback=self._get_traceback(exc_info),
             message_renderable=self.render_message(record, message),
         )
+        target_console = (
+            error_console
+            if record.levelno >= logging.ERROR and record.exc_info
+            else self.console
+        )
+        target_console.print(renderable, crop=False, overflow="ignore")
 
-        if record.levelno >= logging.ERROR and record.exc_info:
-            error_console.print(renderable, crop=False, overflow="ignore")
-        else:
-            self.console.print(renderable, crop=False, overflow="ignore")
+
+class PlainTextLogHandler(BaseConsoleLogHandler):
+    """Plain-text log handler for serve-mode output streams."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        message, exc_info = self._prepare_emit(record)
+        target = (
+            error_console.file
+            if record.levelno >= logging.ERROR and record.exc_info
+            else self.console.file
+        )
+        plain = Text.from_ansi(message.replace("\r", "")).plain
+        plain = (
+            f"{_plain_log_timestamp(record)} [{_plain_log_level(record)}] "
+            f"{_plain_log_prefix()}{plain}"
+        )
+        target.write(plain + "\n")
+        if exc_info is not None:
+            exc_type, exc_value, exc_tb = exc_info
+            target.write(
+                "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+            )
+        target.flush()
 
 
 class _DBLogFilter(logging.Filter):
-    """Exclude noisy third-party loggers from DB storage."""
+    """Exclude noisy third-party debug logs from DB storage."""
 
     _excluded_prefixes = ("httpcore", "httpx", "http11", "connection")
 
@@ -982,7 +1009,6 @@ class DBLogHandler(logging.Handler):
         from atopile.errors import (
             extract_traceback_frames,
             get_exception_display_message,
-            render_ato_traceback,
         )
 
         level = _LEVEL_MAP[record.levelno]
@@ -1001,7 +1027,7 @@ class DBLogHandler(logging.Handler):
         exc_value = record.exc_info[1] if record.exc_info else None
         if exc_value and isinstance(exc_value, _BaseBaseUserException):
             message = get_exception_display_message(exc_value)
-            ato_tb = render_ato_traceback(exc_value)
+            ato_tb = json.dumps(exc_value.serialize_traceback())
             if record.exc_info:
                 py_tb = json.dumps(extract_traceback_frames(*record.exc_info))
         else:
@@ -1029,15 +1055,16 @@ class DBLogHandler(logging.Handler):
 # Module Init
 # =============================================================================
 
-handler = ConsoleLogHandler(console=error_console)
+handler = (
+    PlainTextLogHandler(console=_RUNTIME_LOGGING.plain_console)
+    if _use_plain_console_logs()
+    else RichConsoleLogHandler(console=error_console)
+)
 handler.setFormatter(_DEFAULT_FORMATTER)
 handler.setLevel(logging.INFO)
 _db_handler = DBLogHandler(level=logging.DEBUG)
 _db_handler.addFilter(_DBLogFilter())
 logging.basicConfig(level=logging.DEBUG, handlers=[handler, _db_handler])
-
-if _is_serving():
-    handler.console = console
 
 
 def _shutdown_logging() -> None:

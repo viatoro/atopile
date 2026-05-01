@@ -42,13 +42,13 @@ from rich.text import Text
 from rich.theme import Theme
 from rich.tree import Tree
 
-from atopile.dataclasses import BuildStatus
+from atopile.data_models import BuildStatus
 from faebryk.libs.util import ConfigFlag, ConfigFlagInt
 
 if TYPE_CHECKING:
     from rich.console import RenderableType
 
-    from atopile.dataclasses import Build, StageStatus
+    from atopile.data_models import Build, BuildStage, StageStatus
 
 # =============================================================================
 # Shared Style Constants
@@ -563,13 +563,30 @@ class _BuildState:
     """Track state for a single build."""
 
     display_name: str
-    stages: list[dict] = field(default_factory=list)
+    stages: list["BuildStage"] = field(default_factory=list)
     total_stages: int = 10  # Initial estimate until subprocess reports actual count
     status: "BuildStatus" = field(default_factory=lambda: BuildStatus.QUEUED)
     started: bool = False
     reported: bool = False
     last_printed_stage: int = 0  # for verbose mode
     start_time: float = 0.0  # for total build time
+
+
+def _render_frame_for_summary(frame: dict) -> list:
+    """Render a single source frame with line numbers and highlight markers."""
+    items: list = []
+    file_path = frame.get("file", "")
+    line = frame.get("line", "")
+    items.append(Text(f"  Source: {file_path}:{line}", style="magenta"))
+    code = frame.get("code", "")
+    if code:
+        start_line = frame.get("start_line", 1)
+        highlight = set(frame.get("highlight_lines", []))
+        for i, code_line in enumerate(code.split("\n")):
+            line_no = start_line + i
+            marker = ">" if line_no in highlight else " "
+            items.append(Text(f"  {marker}{line_no:>3} | {code_line}", style="dim"))
+    return items
 
 
 class BuildPrinter:
@@ -655,7 +672,7 @@ class BuildPrinter:
                 self._tasks[build_id] = task_id
 
     def stage_update(
-        self, build_id: str, stages: list[dict], total_stages: int | None = None
+        self, build_id: str, stages: list["BuildStage"], total_stages: int | None = None
     ) -> None:
         """Called when stages change - updates progress or prints new stages."""
         state = self._builds.get(build_id)
@@ -683,12 +700,12 @@ class BuildPrinter:
             # (so they appear in correct order relative to logs)
             # We just track completion count here
             state.last_printed_stage = sum(
-                1 for s in stages if s.get("status", "").lower() in terminal_statuses
+                1 for s in stages if s.status.value.lower() in terminal_statuses
             )
         else:
             # Count completed stages for progress bar
             completed_count = sum(
-                1 for s in stages if s.get("status", "").lower() in terminal_statuses
+                1 for s in stages if s.status.value.lower() in terminal_statuses
             )
             # Update progress bar
             if self._progress and build_id in self._tasks:
@@ -696,9 +713,9 @@ class BuildPrinter:
                 # Show current running stage name
                 current_stage = ""
                 for stage in reversed(stages):
-                    status = stage.get("status", "").lower()
+                    status = stage.status.value.lower()
                     if status not in terminal_statuses:
-                        current_stage = stage.get("name", "")
+                        current_stage = stage.name
                         break
                 # Use actual total if known, otherwise estimate
                 display_total = state.total_stages
@@ -739,18 +756,11 @@ class BuildPrinter:
         state = self._builds.get(build_id)
         return state.display_name if state else build_id[:8]
 
-    def _print_verbose_stage(self, stage: dict) -> None:
+    def _print_verbose_stage(self, stage: "BuildStage") -> None:
         """Print a stage completion bar."""
-        from atopile.dataclasses import StageStatus
-
-        status_raw = stage.get("status", StageStatus.SUCCESS.value)
-        try:
-            status = StageStatus(status_raw)
-        except ValueError:
-            status = StageStatus.SUCCESS
-
-        elapsed = stage.get("elapsedSeconds", 0.0)
-        name = stage.get("name", "")
+        status = stage.status
+        elapsed = stage.elapsed_seconds
+        name = stage.name
         icon, color = get_status_style(status)
 
         # Format: ═══════════ ✓ Stage Name [0.5s] ═══════════
@@ -812,24 +822,64 @@ class BuildPrinter:
         for build in builds:
             self._print_build_box(build)
 
+    @staticmethod
+    def _render_ato_traceback_for_summary(
+        ato_tb_raw: str, fallback_message: str
+    ) -> list:
+        """Render a structured JSON ato_traceback for the build summary."""
+        import json as _json
+
+        try:
+            data = _json.loads(ato_tb_raw)
+        except ValueError, TypeError:
+            return [Text(f"  {fallback_message}", style="red"), Text()]
+
+        if not isinstance(data, dict):
+            return [Text(f"  {fallback_message}", style="red"), Text()]
+
+        items: list = []
+        title = data.get("title", "")
+        message = data.get("message", fallback_message)
+        if title:
+            items.append(Text(f"  {title}", style="bold red"))
+        if message:
+            items.append(Text(f"  {message}", style="red"))
+
+        for frame in data.get("frames") or []:
+            items.extend(_render_frame_for_summary(frame))
+
+        origin = data.get("origin")
+        if origin:
+            items.append(Text("  Code causing the error:", style="bold"))
+            items.extend(_render_frame_for_summary(origin))
+
+        items.append(Text())
+        return items
+
     def _print_build_box(self, build: "Build") -> None:
         """Print a single build's summary in a box with logs from database."""
         from rich.console import Group
 
-        from atopile.model.sqlite import Logs
+        from atopile.logging import read_build_logs
 
         icon, color = get_status_style(build.status)
-        display_name = build.display_name or build.name
+        display_name = build.name
         build_id = build.build_id or ""
 
         # Fetch errors and warnings from the database
         errors_list: list[dict] = []
         warnings_list: list[dict] = []
         if build_id:
-            errors_list, _ = Logs.fetch_chunk(
-                build_id, levels=["ERROR", "CRITICAL"], count=50
+            errors_list, _ = read_build_logs(
+                build_id=build_id,
+                log_levels=["ERROR"],
+                count=50,
             )
-            warnings_list, _ = Logs.fetch_chunk(build_id, levels=["WARNING"], count=50)
+            warnings_list, _ = read_build_logs(
+                build_id=build_id,
+                log_levels=["WARNING"],
+                count=50,
+            )
 
         # Build content as a list of renderables
         renderables: list = []
@@ -855,12 +905,12 @@ class BuildPrinter:
         }
         total_stage_time = 0.0
         for stage in build.stages:
-            status_str = stage.get("status", "").lower()
+            status_str = stage.status.value.lower()
             if status_str not in terminal_statuses:
                 continue  # Skip running/pending stages
 
-            stage_name = stage.get("name", stage.get("displayName", ""))
-            elapsed = stage.get("elapsedSeconds", 0.0)
+            stage_name = stage.name
+            elapsed = stage.elapsed_seconds
             total_stage_time += elapsed
             stage_icon, stage_color = get_status_style(status_str)
 
@@ -875,16 +925,13 @@ class BuildPrinter:
             renderables.append(Text())
             renderables.append(Text(f"Errors ({len(errors_list)}):", style="bold red"))
             for err in errors_list[:5]:  # Limit to first 5
-                # Render ato_traceback with ANSI codes preserved (includes the message)
                 ato_tb = err.get("ato_traceback")
                 if ato_tb:
-                    # Parse ANSI text and indent each line
-                    for tb_line in ato_tb.strip().split("\n"):
-                        if tb_line.strip():
-                            indented_line = Text("  ")
-                            indented_line.append_text(Text.from_ansi(tb_line))
-                            renderables.append(indented_line)
-                    renderables.append(Text())  # Blank line between errors
+                    renderables.extend(
+                        self._render_ato_traceback_for_summary(
+                            ato_tb, err.get("message", "")
+                        )
+                    )
                 else:
                     # No traceback, just show the message
                     msg = err.get("message", "")
@@ -904,8 +951,16 @@ class BuildPrinter:
                 Text(f"Warnings ({len(warnings_list)}):", style="bold yellow")
             )
             for warn in warnings_list[:5]:  # Limit to first 5
-                msg = warn.get("message", "")
-                renderables.append(Text(f"  • {msg}", style="yellow"))
+                ato_tb = warn.get("ato_traceback")
+                if ato_tb:
+                    renderables.extend(
+                        self._render_ato_traceback_for_summary(
+                            ato_tb, warn.get("message", "")
+                        )
+                    )
+                else:
+                    msg = warn.get("message", "")
+                    renderables.append(Text(f"  • {msg}", style="yellow"))
             if len(warnings_list) > 5:
                 renderables.append(
                     Text(

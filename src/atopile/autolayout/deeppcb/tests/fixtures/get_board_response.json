@@ -1,0 +1,68 @@
+{
+  "userId": "user-123",
+  "boardId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "boardPId": "BP-001",
+  "name": "test-board",
+  "inputType": "Json",
+  "type": 1,
+  "createdOn": "2025-01-15T10:30:00Z",
+  "layers": 2,
+  "pins": 42,
+  "ratsNest": 10,
+  "totalAirWires": 20,
+  "totalComponents": 5,
+  "isFree": true,
+  "confirmed": true,
+  "boardStatus": "Running",
+  "requiresCredits": false,
+  "result": {
+    "airWiresConnected": 18,
+    "netsConnected": 8,
+    "viaAdded": 3,
+    "totalWireLength": 1234.5,
+    "airWiresNotConnected": 2,
+    "totalAirWires": 20,
+    "createdOn": "2025-01-15T10:30:00Z",
+    "totalProcessingTime": "00:05:30"
+  },
+  "ratingsAndFeedback": {
+    "speedRating": 0,
+    "drcRating": 0,
+    "solutionRating": 0,
+    "average": 0
+  },
+  "isValidForRouting": true,
+  "isValidForPlacement": false,
+  "workflows": [
+    {
+      "id": "wf-001",
+      "workflowId": "wf-id-001",
+      "status": 3,
+      "workflowTimeOut": 30,
+      "workflowMaxBatchTimeOut": 120,
+      "workflowTimeToLive": 300,
+      "workflowCostPerMinute": 0.5,
+      "jobType": "Routing",
+      "routingType": "EmptyBoard",
+      "revisions": [
+        {
+          "id": "rev-001",
+          "revisionNumber": 1,
+          "result": {
+            "airWiresConnected": 18,
+            "airWiresNotConnected": 2,
+            "totalAirWires": 20,
+            "netsConnected": 8,
+            "viaAdded": 3,
+            "totalWireLength": 1234.5,
+            "numNets": 10,
+            "numNetsCompleted": 8
+          },
+          "isModified": false,
+          "isConvergenceRevision": false,
+          "isDraft": false
+        }
+      ]
+    }
+  ]
+}

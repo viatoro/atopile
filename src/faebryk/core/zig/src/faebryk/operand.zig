@@ -4,6 +4,7 @@ const edgebuilder_mod = @import("edgebuilder.zig");
 const node_type_mod = @import("node_type.zig");
 const composition_mod = @import("composition.zig");
 const typegraph_mod = @import("typegraph.zig");
+const cast = @import("cast");
 
 const graph = graph_mod.graph;
 const visitor = graph_mod.visitor;
@@ -93,7 +94,7 @@ pub const EdgeOperand = struct {
             cb: *const fn (*anyopaque, graph.BoundEdgeReference) visitor.VisitResult(T),
 
             pub fn visit(self_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(T) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
                 const operand = EdgeOperand.get_operand_of(bound_edge.edge, self.target.node);
                 if (operand) |_| {
                     const operand_result = self.cb(self.cb_ctx, bound_edge);
@@ -123,7 +124,7 @@ pub const EdgeOperand = struct {
             cb: *const fn (*anyopaque, graph.BoundEdgeReference) visitor.VisitResult(T),
 
             pub fn visit(self_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(T) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
                 // Filter out self-references
                 const expression = EdgeOperand.get_expression_of(bound_edge, self.target.node);
                 if (expression) |_| {
@@ -177,7 +178,7 @@ pub const EdgeOperand = struct {
             identifier: str,
 
             pub fn visit(self_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(graph.BoundNodeReference) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
                 if (bound_edge.edge.get_attribute_name()) |n| {
                     if (std.mem.eql(u8, n, self.identifier)) {
                         const target = bound_edge.edge.get_directed_target() orelse {
@@ -223,7 +224,7 @@ pub const EdgeOperand = struct {
             cb: *const fn (*anyopaque, graph.BoundEdgeReference) visitor.VisitResult(T),
 
             pub fn visit(self_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(T) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
                 const operand = bound_edge.g.bind(EdgeOperand.get_operand_node(bound_edge.edge));
                 if (!EdgeType.is_node_instance_of(operand, self.operand_type)) {
                     return visitor.VisitResult(T){ .CONTINUE = {} };
@@ -257,7 +258,7 @@ pub const EdgeOperand = struct {
             cb: *const fn (*anyopaque, graph.BoundEdgeReference) visitor.VisitResult(T),
 
             pub fn visit(self_ptr: *anyopaque, bound_edge: graph.BoundEdgeReference) visitor.VisitResult(T) {
-                const self: *@This() = @ptrCast(@alignCast(self_ptr));
+                const self = cast.ctx(@This(), self_ptr);
                 const expression = bound_edge.g.bind(EdgeOperand.get_expression_node(bound_edge));
                 if (!EdgeType.is_node_instance_of(expression, self.expression_type)) {
                     return visitor.VisitResult(T){ .CONTINUE = {} };
@@ -318,7 +319,7 @@ test "edge operand basic" {
         edges: std.array_list.Managed(graph.BoundEdgeReference),
 
         pub fn visit(ctx: *anyopaque, operand_edge: graph.BoundEdgeReference) visitor.VisitResult(void) {
-            const self: *@This() = @ptrCast(@alignCast(ctx));
+            const self = cast.ctx(@This(), ctx);
             self.edges.append(operand_edge) catch |err| {
                 return visitor.VisitResult(void){ .ERROR = err };
             };

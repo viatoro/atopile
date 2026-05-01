@@ -12,6 +12,7 @@ from atopile.compiler.build import (
     StdlibRegistry,
     build_file,
 )
+from atopile.errors import iter_leaf_exceptions
 from test.compiler.conftest import build_type
 
 
@@ -58,6 +59,25 @@ def test_stdlib_type_without_import_raises():
         )
 
 
+def test_multiple_unresolved_symbols_are_collected():
+    with pytest.raises(ExceptionGroup) as exc_info:
+        build_type(
+            """
+            module Root:
+                part1 = new MissingOne
+                part2 = new MissingTwo
+            """,
+            link=True,
+        )
+
+    leaves = list(iter_leaf_exceptions(exc_info.value))
+    messages = [str(exc) for exc in leaves]
+
+    assert len(leaves) == 2
+    assert any("MissingOne" in message for message in messages)
+    assert any("MissingTwo" in message for message in messages)
+
+
 def test_resolves_relative_ato_import(tmp_path: Path):
     module_dir = tmp_path / "pkg"
     module_dir.mkdir(parents=True)
@@ -91,6 +111,73 @@ def test_resolves_relative_ato_import(tmp_path: Path):
 
     linker = Linker(None, stdlib, tg)
     linker.link_imports(g, result.state)
+
+    assert not fbrk.Linker.collect_unresolved_type_references(type_graph=tg)
+
+
+def test_unused_missing_path_import_raises(tmp_path: Path):
+    entry_path = tmp_path / "entry.ato"
+    entry_path.write_text(
+        textwrap.dedent(
+            """
+            from "missing/module.ato" import MissingModule
+
+            module Root:
+                pass
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    g, tg, stdlib = _init_graph()
+    result = build_file(g=g, tg=tg, import_path="entry.ato", path=entry_path)
+
+    linker = Linker(None, stdlib, tg)
+    with pytest.raises(
+        DslRichException, match="Unable to resolve import `missing/module.ato`"
+    ):
+        linker.link_imports(g, result.state)
+
+
+def test_cached_current_file_still_resolves_imported_file(tmp_path: Path):
+    dep_path = tmp_path / "dep.ato"
+    dep_path.write_text(
+        textwrap.dedent(
+            """
+            module Dep:
+                pass
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    entry_path = tmp_path / "entry.ato"
+    entry_path.write_text(
+        textwrap.dedent(
+            """
+            from "dep.ato" import Dep
+
+            module Root:
+                child = new Dep
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    g, tg, stdlib = _init_graph()
+    dep_result = build_file(g=g, tg=tg, import_path=str(dep_path), path=dep_path)
+    entry_result = build_file(g=g, tg=tg, import_path=str(entry_path), path=entry_path)
+
+    linker = Linker(
+        None,
+        stdlib,
+        tg,
+        linked_modules_seed={
+            dep_path.resolve(): dep_result.state.type_roots,
+            entry_path.resolve(): entry_result.state.type_roots,
+        },
+    )
+    linker.link_imports(g, entry_result.state)
 
     assert not fbrk.Linker.collect_unresolved_type_references(type_graph=tg)
 

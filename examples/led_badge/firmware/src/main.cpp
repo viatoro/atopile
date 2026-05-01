@@ -17,7 +17,7 @@
 
 // I2S pins for microphone (from led_badge.ato)
 #define I2S_SCK_PIN 0  // i2s.sck - GPIO0
-#define I2S_WS_PIN 3   // i2s.ws - GPIO3  
+#define I2S_WS_PIN 3   // i2s.ws - GPIO3
 #define I2S_SD_PIN 1   // i2s.sd - GPIO1
 
 // NeoPixel object
@@ -524,14 +524,14 @@ void configureI2S()
     Serial.println(err);
     return;
   }
-  
+
   err = i2s_set_pin(I2S_NUM_0, &pin_config);
   if (err != ESP_OK) {
     Serial.print("Failed to set I2S pins: ");
     Serial.println(err);
     return;
   }
-  
+
   err = i2s_set_clk(I2S_NUM_0, SAMPLING_FREQUENCY, I2S_BITS_PER_SAMPLE_32BIT, I2S_CHANNEL_MONO);
   if (err != ESP_OK) {
     Serial.print("Failed to set I2S clock: ");
@@ -549,7 +549,7 @@ void readAudioData()
   int32_t i2s_read_buff[SAMPLES];
 
   esp_err_t result = i2s_read(I2S_NUM_0, (void *)i2s_read_buff, sizeof(i2s_read_buff), &bytes_read, portMAX_DELAY);
-  
+
   if (result != ESP_OK) {
     Serial.print("I2S read error: ");
     Serial.println(result);
@@ -562,7 +562,7 @@ void readAudioData()
   int32_t min_val = INT32_MAX;
   int32_t max_val = INT32_MIN;
   int non_zero_count = 0;
-  
+
   // Convert 32-bit samples to doubles for FFT
   // With RIGHT_LEFT format, we get interleaved stereo data
   int fft_index = 0;
@@ -570,12 +570,12 @@ void readAudioData()
   {
     int32_t sample = i2s_read_buff[i];
     if (sample != 0) non_zero_count++;
-    
+
     sum += abs(sample);
     if (abs(sample) > peak) peak = abs(sample);
     if (sample < min_val) min_val = sample;
     if (sample > max_val) max_val = sample;
-    
+
     // Only use left channel samples (every other sample)
     if (i % 2 == 0) {
       // ICS-43434 outputs 24-bit data in 32-bit frame
@@ -585,14 +585,14 @@ void readAudioData()
       fft_index++;
     }
   }
-  
+
   // Fill remaining FFT buffer if needed
   while (fft_index < SAMPLES) {
     vReal[fft_index] = 0.0;
     vImag[fft_index] = 0.0;
     fft_index++;
   }
-  
+
   // Print debug info every 500ms
   static unsigned long lastDebugMic = 0;
   if (millis() - lastDebugMic > 500) {
@@ -609,7 +609,7 @@ void readAudioData()
     Serial.print(max_val);
     Serial.print(" NonZero: ");
     Serial.print(non_zero_count);
-    
+
     // Print first few raw samples
     Serial.print(" Raw[0-4]: ");
     for (int i = 0; i < 5; i++) {
@@ -617,7 +617,7 @@ void readAudioData()
       Serial.print(" ");
     }
     Serial.println();
-    
+
     lastDebugMic = millis();
   }
 }
@@ -761,16 +761,16 @@ void drawVerticalLine()
 void updateAndDrawAudioLevels()
 {
   readAudioData();
-  
+
   // Apply window function
   FFT.windowing(FFT_WIN_TYP_HAMMING, FFT_FORWARD);
-  
+
   // Compute FFT
   FFT.compute(FFT_FORWARD);
-  
+
   // Compute magnitudes
   FFT.complexToMagnitude();
-  
+
   // Logarithmic frequency bins from 30Hz to 10kHz
   // 10 bins for 10 columns on the display
   const float minFreq = 30.0;    // 30 Hz
@@ -778,29 +778,29 @@ void updateAndDrawAudioLevels()
   const float logMin = log10(minFreq);
   const float logMax = log10(maxFreq);
   const float logStep = (logMax - logMin) / MATRIX_WIDTH;
-  
+
   // Calculate bin edges in Hz
   float binEdges[MATRIX_WIDTH + 1];
   for (int i = 0; i <= MATRIX_WIDTH; i++) {
     binEdges[i] = pow(10, logMin + i * logStep);
   }
-  
+
   // Convert frequencies to FFT bin indices
   const float binWidth = (float)SAMPLING_FREQUENCY / SAMPLES;
-  
+
   // Clear the display
   strip.clear();
-  
+
   // For each column (frequency bin)
   for (int col = 0; col < MATRIX_WIDTH; col++) {
     // Find FFT bins that fall within this frequency range
     int startBin = (int)(binEdges[col] / binWidth);
     int endBin = (int)(binEdges[col + 1] / binWidth);
-    
+
     // Ensure bins are within valid range
     startBin = max(1, min(startBin, SAMPLES/2 - 1));
     endBin = max(startBin + 1, min(endBin, SAMPLES/2));
-    
+
     // Find peak magnitude in this frequency range
     double peakMag = 0;
     for (int bin = startBin; bin < endBin; bin++) {
@@ -808,20 +808,20 @@ void updateAndDrawAudioLevels()
         peakMag = vReal[bin];
       }
     }
-    
+
     // Convert to dB scale and normalize
     double dB = 20.0 * log10(peakMag + 1);
     int level = (int)(dB * 2.5); // Scale factor to fit display
     level = constrain(level, 0, 255);
-    
+
     // Map to display height (0-9)
     int barHeight = map(level, 0, 255, 0, MATRIX_HEIGHT);
-    
+
     // Draw the bar for this frequency
     for (int row = 0; row < barHeight; row++) {
       // Draw from bottom up
       int y = MATRIX_HEIGHT - 1 - row;
-      
+
       // Color gradient: green at bottom, yellow in middle, red at top
       uint8_t r, g, b;
       if (row < MATRIX_HEIGHT / 3) {
@@ -840,13 +840,13 @@ void updateAndDrawAudioLevels()
         g = 0;
         b = 0;
       }
-      
+
       strip.setPixelColor(getLEDIndex(col, y), strip.Color(r, g, b));
     }
   }
-  
+
   strip.show();
-  
+
   // Debug output every 500ms
   static unsigned long lastDebugLevels = 0;
   if (millis() - lastDebugLevels > 500) {
@@ -869,26 +869,26 @@ void detectBeat() {
   FFT.windowing(FFT_WIN_TYP_HAMMING, FFT_FORWARD);
   FFT.compute(FFT_FORWARD);
   FFT.complexToMagnitude();
-  
+
   // Calculate bass energy (20Hz - 200Hz range)
   float currentBassEnergy = 0;
   int bassStartBin = (int)(20.0 * SAMPLES / SAMPLING_FREQUENCY);
   int bassEndBin = (int)(200.0 * SAMPLES / SAMPLING_FREQUENCY);
-  
+
   for (int bin = bassStartBin; bin < bassEndBin && bin < SAMPLES/2; bin++) {
     currentBassEnergy += vReal[bin];
   }
-  
+
   // Calculate average bass energy from history
   float averageBassEnergy = 0;
   for (int i = 0; i < 20; i++) {
     averageBassEnergy += bassEnergyHistory[i];
   }
   averageBassEnergy /= 20.0;
-  
+
   // Detect beat if current energy exceeds threshold * average
   unsigned long currentTime = millis();
-  if (currentBassEnergy > averageBassEnergy * beatThreshold && 
+  if (currentBassEnergy > averageBassEnergy * beatThreshold &&
       currentTime - lastBeatTime > beatCooldown &&
       averageBassEnergy > 10) { // Minimum energy threshold to avoid noise
     beatDetected = true;
@@ -896,11 +896,11 @@ void detectBeat() {
     beatBrightness = 255; // Full brightness on beat
     Serial.println("BEAT!");
   }
-  
+
   // Update history
   bassEnergyHistory[bassHistoryIndex] = currentBassEnergy;
   bassHistoryIndex = (bassHistoryIndex + 1) % 20;
-  
+
   // Decay brightness
   if (beatBrightness > 0) {
     beatBrightness = beatBrightness * 0.85; // Fast decay
@@ -911,20 +911,20 @@ void detectBeat() {
 // Display function for beat flash mode
 void drawBeatFlash() {
   strip.clear();
-  
+
   if (beatBrightness > 0) {
     // Flash entire matrix with current brightness
     uint8_t r = beatBrightness;
     uint8_t g = beatBrightness / 2;
     uint8_t b = beatBrightness / 4;
-    
+
     for (int x = 0; x < MATRIX_WIDTH; x++) {
       for (int y = 0; y < MATRIX_HEIGHT; y++) {
         strip.setPixelColor(getLEDIndex(x, y), strip.Color(r, g, b));
       }
     }
   }
-  
+
   strip.show();
 }
 

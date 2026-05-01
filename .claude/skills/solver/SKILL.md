@@ -17,7 +17,7 @@ If you are touching solver internals, read these first:
 ```python
 import faebryk.core.node as fabll
 import faebryk.library._F as F
-from faebryk.core.solver.defaultsolver import DefaultSolver
+from faebryk.core.solver import Solver
 from faebryk.libs.test.boundexpressions import BoundExpressions
 
 E = BoundExpressions()
@@ -29,17 +29,18 @@ app = _App.bind_typegraph(tg=E.tg).create_instance(g=E.g)
 x = app.x.get().can_be_operand.get()
 E.is_subset(x, E.lit_op_range(((9, E.U.dl), (11, E.U.dl))), assert_=True)
 
-solver = DefaultSolver()
-res = solver.simplify(g=E.g, tg=E.tg, terminal=True).data.mutation_map
-lit = res.try_extract_superset(app.x.get().is_parameter_operatable.get(), domain_default=True)
+solver = Solver()
+solver.simplify_for(app.x.get().as_operand.get())
+lit = solver.extract_superset(app.x.get())
 assert lit is not None
 ```
 
 ## Relevant Files
 
 - Solver runtime + orchestration:
-  - `src/faebryk/core/solver/defaultsolver.py` (`DefaultSolver`, iteration loop, terminal vs non-terminal)
-  - `src/faebryk/core/solver/solver.py` (solver protocol + helper APIs)
+  - `src/faebryk/core/solver/__init__.py` (default solver selection)
+  - `src/faebryk/core/solver/simple_solver.py` (default fast target-driven solver)
+  - `src/faebryk/core/solver/solver.py` (full symbolic solver + helper APIs)
 - Mutation machinery (this is where “graphs are append-only” is handled):
   - `src/faebryk/core/solver/mutator.py` (`Mutator`, `Transformations`, `MutationStage`, `MutationMap`, tracebacks)
 - Symbolic layer (canonical forms + invariants):
@@ -87,7 +88,8 @@ The solver cannot “edit” an expression in-place. Instead it:
 ### Development Workflow
 
 1) Reproduce in a minimal graph (prefer tests + `BoundExpressions`).
-2) Run `DefaultSolver().simplify(...)` and inspect the resulting `MutationMap`.
+2) Prefer `Solver().simplify_for(...)` and inspect extracted bounds or the returned `MutationMap`.
+   This also applies when you import the concrete full symbolic solver directly.
 3) If you’re changing rewrite logic, make sure you understand and preserve the invariant pipeline in
    `src/faebryk/core/solver/symbolic/invariants.py::insert_expression`.
 4) Add/adjust algorithms in `src/faebryk/core/solver/symbolic/*` (most logic lives there, not in `mutator.py`).
@@ -105,13 +107,16 @@ Run a tight loop while iterating:
 
 ## Best Practices
 
-### Prefer explicit `simplify(...)` arguments
-`DefaultSolver.simplify` has a compatibility layer that accepts `(tg, g)` or `(g, tg)`. In new code, prefer named args:
+### Prefer `simplify_for(...)`
+The solver API is target-driven. In new code, prefer:
 
 ```python
-res = DefaultSolver().simplify(g=g, tg=tg, terminal=True)
-mutation_map = res.data.mutation_map
+solver = Solver()
+state = solver.simplify_for(param.as_operand.get(), terminal=False)
+mutation_map = state.mutation_map
 ```
+
+This preference also applies to the concrete full symbolic solver. `simplify(...)` remains available for compatibility and still appears in some full-solver-only tests, but it is not the preferred entry point for new code.
 
 ### Use the `Mutator`/`insert_expression` pipeline, not ad-hoc rewrites
 When you “create” or “rewrite” an expression, you are really requesting that the solver insert something into the
@@ -148,11 +153,11 @@ and let `insert_expression` do the hard work.
 ## Internals & Runtime Behavior
 
 ### Instantiation & Dependencies
-- **`DefaultSolver()` holds state**: when called with `terminal=False`, it can keep a reusable internal state for incremental solving.
+- **`Solver()` holds state**: after `simplify_for(...)`, the solver keeps the resulting `MutationMap` for bound extraction.
 - **Terminal vs non-terminal**:
-  - `terminal=True` (default) is more powerful but not intended to be reused as incremental state.
-  - `terminal=False` runs only non-terminal algorithms and stores `reusable_state` for subsequent calls.
-- **Graph scoping**: `simplify(..., relevant=[...])` is the intended hook to avoid “solve the entire world”.
+  - On the simple solver, `terminal` is accepted for API compatibility but solving is target-driven through `simplify_for(...)`.
+  - On the full symbolic solver, `simplify(...)` still distinguishes terminal vs non-terminal symbolic phases.
+- **Graph scoping**: on the simple solver, `simplify_for(...)` is the scoping mechanism. On the full symbolic solver, `simplify(..., relevant=[...])` still exists.
 
 ### Data Structures
 - `MutationStage`: one algorithm application over an input graph → output graph, with a `Transformations` object.

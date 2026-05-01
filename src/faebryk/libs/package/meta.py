@@ -158,9 +158,11 @@ class PackageMeta:
             # Skip the metadata file itself
             if file_path.name == PACKAGE_META_FILENAME:
                 continue
-            # Skip hidden files/directories
+            # Skip hidden files/directories and __pycache__
             rel_path = file_path.relative_to(package_path)
-            if any(part.startswith(".") for part in rel_path.parts):
+            if any(
+                part.startswith(".") or part == "__pycache__" for part in rel_path.parts
+            ):
                 continue
 
             try:

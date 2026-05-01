@@ -1,0 +1,174 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+.ephemeral-banner {
+    background: var(--ato-orange-subtle, rgba(249, 80, 21, 0.08));
+    border-bottom: 1px solid rgba(249, 80, 21, 0.2);
+    padding: 10px 24px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--vscode-editor-foreground, #bac2de);
+    letter-spacing: 0.01em;
+}
+.ephemeral-banner strong {
+    color: var(--ato-orange);
+}
+
+.hero {
+    text-align: center;
+    padding: 56px 24px 40px;
+    position: relative;
+}
+.hero::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 80%;
+    max-width: 500px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(249,80,21,0.3), transparent);
+}
+.hero-logo {
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 24px;
+    opacity: 0.9;
+}
+.hero h1 {
+    font-family: 'Barlow', sans-serif;
+    font-weight: 800;
+    font-size: 2.4em;
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #fff 0%, #bac2de 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.hero .tagline {
+    font-size: 1.1em;
+    color: var(--vscode-descriptionForeground, #a6adc8);
+    font-weight: 400;
+}
+
+.content {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 40px 24px 64px;
+}
+
+.steps {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 40px;
+}
+.step {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 16px 20px;
+    background: var(--vscode-textBlockQuote-background, rgba(255,255,255,0.03));
+    border: 1px solid var(--vscode-widget-border, rgba(255,255,255,0.06));
+    border-radius: var(--radius-lg, 8px);
+    transition: border-color var(--transition-normal, 0.15s ease);
+}
+.step:hover {
+    border-color: rgba(249, 80, 21, 0.3);
+}
+.step-num {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--ato-orange);
+    color: #fff;
+    font-weight: 700;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 1px;
+}
+.step-text { flex: 1; }
+.step-title {
+    font-weight: 700;
+    font-size: 0.95em;
+    margin-bottom: 2px;
+}
+.step-desc {
+    font-size: 0.88em;
+    color: var(--vscode-descriptionForeground, #a6adc8);
+    line-height: 1.5;
+}
+
+h2 {
+    font-family: 'Barlow', sans-serif;
+    font-weight: 700;
+    font-size: 1.15em;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--vscode-descriptionForeground, #a6adc8);
+    margin-bottom: 16px;
+}
+
+.cta-card {
+    background: linear-gradient(135deg, rgba(249,80,21,0.06) 0%, rgba(249,80,21,0.02) 100%);
+    border: 1px solid rgba(249, 80, 21, 0.2);
+    border-radius: 10px;
+    padding: 28px;
+    text-align: center;
+}
+.cta-card h3 {
+    font-family: 'Barlow', sans-serif;
+    font-weight: 700;
+    font-size: 1.2em;
+    margin-bottom: 8px;
+}
+.cta-card p {
+    color: var(--vscode-descriptionForeground, #a6adc8);
+    font-size: 0.95em;
+    margin-bottom: 20px;
+    line-height: 1.5;
+}
+.cta-btn {
+    display: inline-block;
+    background: var(--ato-orange);
+    color: #fff;
+    font-family: 'Barlow', sans-serif;
+    font-weight: 700;
+    font-size: 0.95em;
+    padding: 10px 28px;
+    border-radius: var(--radius-lg, 6px);
+    text-decoration: none;
+    cursor: pointer;
+    transition: background var(--transition-normal, 0.15s ease);
+}
+.cta-btn:hover { background: var(--ato-orange-light); }
+
+.docs-links {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 40px;
+    flex-wrap: wrap;
+}
+.docs-link {
+    flex: 1;
+    min-width: 140px;
+    padding: 14px 16px;
+    background: var(--vscode-textBlockQuote-background, rgba(255,255,255,0.03));
+    border: 1px solid var(--vscode-widget-border, rgba(255,255,255,0.06));
+    border-radius: var(--radius-lg, 8px);
+    text-decoration: none;
+    color: var(--vscode-editor-foreground, #cdd6f4);
+    transition: border-color var(--transition-normal, 0.15s ease);
+    text-align: center;
+    cursor: pointer;
+}
+.docs-link:hover {
+    border-color: rgba(249, 80, 21, 0.3);
+    text-decoration: none;
+}
+.docs-link-icon { font-size: 1.4em; margin-bottom: 4px; }
+.docs-link-label { font-weight: 600; font-size: 0.9em; }

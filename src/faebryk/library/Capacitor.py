@@ -37,12 +37,6 @@ class Capacitor(fabll.Node):
 
     # Alias for backwards compatibility
     power = F.ElectricPower.MakeChild()
-    _asserts = [
-        # max_voltage >= power.voltage
-        F.Expressions.GreaterOrEqual.MakeChild(
-            [max_voltage], [power, F.ElectricPower.voltage], assert_=True
-        )
-    ]
 
     # Connect power to unnamed[0] and unnamed[1]
     _connections = [
@@ -82,13 +76,28 @@ class Capacitor(fabll.Node):
                 "max_voltage": max_voltage,
                 "temperature_coefficient": temperature_coefficient,
             },
+            package_prefix="C",
         )
+    )
+
+    _is_eseries = fabll.Traits.MakeEdge(
+        F.is_eseries_value.MakeChild(
+            series=F.is_eseries_value.Series.E24,
+            tolerance=0.1,
+            practical_range=(1e-12, 1e-3),  # 1 pF to 1 mF
+        ),
+        [capacitance],
     )
 
     S = F.has_simple_value_representation.Spec
     _simple_repr = fabll.Traits.MakeEdge(
         F.has_simple_value_representation.MakeChild(
-            S(capacitance, tolerance=True),
+            S(
+                capacitance,
+                format_mode=(
+                    F.has_simple_value_representation.FormatMode.VALUE_WITH_TOLERANCE
+                ),
+            ),
             S(max_voltage),
             S(temperature_coefficient),
         )

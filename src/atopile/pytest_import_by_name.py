@@ -25,32 +25,19 @@ import pytest
 
 _TEST_HINT_RE = re.compile(r"(^|\n)\s*(def\s+test_|class\s+Test)", re.MULTILINE)
 
-_ROOT: Path | None = None
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    """
-    Capture pytest's chosen repository root.
-
-    Important: this plugin may be imported from site-packages (not from the repo),
-    so deriving the repo root from `__file__` is unreliable.
-    """
-    global _ROOT
-    _ROOT = Path(str(config.rootpath)).resolve()
-
 
 def _module_name_for_src_file(path: Path) -> str | None:
     if path.is_dir():
         return None
 
-    root = _ROOT or Path.cwd().resolve()
-    src_root = root / "src"
-
-    try:
-        rel = path.resolve().relative_to(src_root)
-    except Exception:
+    resolved_path = path.resolve()
+    src_root = next(
+        (parent for parent in resolved_path.parents if parent.name == "src"), None
+    )
+    if src_root is None:
         return None
 
+    rel = resolved_path.relative_to(src_root)
     if rel.parts[:1] not in {("faebryk",), ("atopile",)}:
         return None
 

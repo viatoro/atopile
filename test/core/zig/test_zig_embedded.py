@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from faebryk.libs.util import debug_perf, repo_root
+from faebryk.libs.util import app_root, debug_perf
 
 ZIG_COMMAND = [sys.executable, "-m", "ziglang"]
 
-ZIG_SRC_DIR = repo_root() / "src" / "faebryk" / "core" / "zig"
+ZIG_SRC_DIR = app_root() / "src" / "faebryk" / "core" / "zig"
 
 TEST_NAME_PATTERN = re.compile(r'^test "([^"]+)"', re.MULTILINE)
 TEST_BLOCK_PATTERN = re.compile(r'^test "')

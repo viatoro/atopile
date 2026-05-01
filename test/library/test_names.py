@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from faebryk.libs.util import repo_root as _repo_root
+from faebryk.libs.util import app_root as _app_root
 
 
 def _extract_classes_from_file(filepath: Path):
@@ -19,7 +19,7 @@ def _extract_classes_from_file(filepath: Path):
 def _is_module_import(name: str) -> bool:
     """Check if name is imported as a module (not a class) in _F.py."""
     with open(
-        _repo_root() / "src" / "faebryk" / "library" / "_F.py", "r", encoding="utf-8"
+        _app_root() / "src" / "faebryk" / "library" / "_F.py", "r", encoding="utf-8"
     ) as file:
         tree = ast.parse(file.read())
 
@@ -37,7 +37,7 @@ def _is_module_import(name: str) -> bool:
     "py_file",
     [
         p
-        for p in (_repo_root() / "src" / "faebryk" / "library").glob("**/*.py")
+        for p in (_app_root() / "src" / "faebryk" / "library").glob("**/*.py")
         if p.is_file() and not p.stem.startswith("_") and not _is_module_import(p.stem)
     ],
     ids=lambda p: p.stem,

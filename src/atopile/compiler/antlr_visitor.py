@@ -95,7 +95,11 @@ class ANTLRVisitor(AtoParserVisitor):
             case (None, None, compound_stmt):
                 return [self.visitCompound_stmt(compound_stmt)]
             case _:
-                assert False, f"Unexpected statement: {ctx.getText()}"
+                logger.debug(
+                    "Skipping malformed statement during recovered parse: %s",
+                    ctx.getText(),
+                )
+                return []
 
     def visitStmts(
         self, ctxs: Sequence[AtoParser.StmtContext]
@@ -158,7 +162,7 @@ class ANTLRVisitor(AtoParserVisitor):
     def visitSimple_stmt(
         self, ctx: AtoParser.Simple_stmtContext
     ) -> AST.is_statement | list[AST.is_statement]:
-        (stmt_ctx,) = [
+        stmt_contexts = [
             stmt_ctx
             for stmt_ctx in [
                 ctx.import_stmt(),
@@ -176,6 +180,15 @@ class ANTLRVisitor(AtoParserVisitor):
             ]
             if stmt_ctx is not None
         ]
+
+        if len(stmt_contexts) != 1:
+            logger.debug(
+                "Skipping malformed simple statement during recovered parse: %s",
+                ctx.getText(),
+            )
+            return []
+
+        (stmt_ctx,) = stmt_contexts
 
         stmt = self.visit(stmt_ctx)
         # Handle multi-import statements which return a list of ImportStmt
@@ -479,45 +492,41 @@ class ANTLRVisitor(AtoParserVisitor):
         )
 
     def visitAssignable(self, ctx: AtoParser.AssignableContext) -> AST.is_assignable:
-        match (
-            ctx.new_stmt(),
-            ctx.literal_physical(),
-            ctx.arithmetic_expression(),
-            ctx.string(),
-            ctx.boolean_(),
-        ):
-            case (new_stmt_ctx, None, None, None, None):
-                return self.visitNew_stmt(new_stmt_ctx)._is_assignable.get()
-            case (None, literal_physical_ctx, None, None, None):
-                return self.visitLiteral_physical(
-                    literal_physical_ctx
-                )._is_assignable.get()
-            case (None, None, arithmetic_expression_ctx, None, None):
-                arith_result = self.visitArithmetic_expression(
-                    arithmetic_expression_ctx
+        if (new_stmt_ctx := ctx.new_stmt()) is not None:
+            return self.visitNew_stmt(new_stmt_ctx)._is_assignable.get()
+
+        if (literal_physical_ctx := ctx.literal_physical()) is not None:
+            return self.visitLiteral_physical(literal_physical_ctx)._is_assignable.get()
+
+        if (arithmetic_expression_ctx := ctx.arithmetic_expression()) is not None:
+            arith_result = self.visitArithmetic_expression(arithmetic_expression_ctx)
+            # Check if this is just a field reference (e.g., `r1 = Resistor`)
+            # which is not a valid assignable - user likely forgot `new`
+            underlying = fabll.Traits(arith_result).get_obj_raw()
+            if underlying.isinstance(AST.FieldRef):
+                ref_text = arithmetic_expression_ctx.getText()
+                raise UserSyntaxError.from_ctx(
+                    arithmetic_expression_ctx,
+                    "Cannot assign type reference. "
+                    f"To create an instance, use: `new {ref_text}`",
                 )
-                # Check if this is just a field reference (e.g., `r1 = Resistor`)
-                # which is not a valid assignable - user likely forgot `new`
-                underlying = fabll.Traits(arith_result).get_obj_raw()
-                if underlying.isinstance(AST.FieldRef):
-                    ref_text = arithmetic_expression_ctx.getText()
-                    raise UserSyntaxError.from_ctx(
-                        arithmetic_expression_ctx,
-                        "Cannot assign type reference. "
-                        f"To create an instance, use: `new {ref_text}`",
-                    )
-                return arith_result.as_assignable.get()
-            case (None, None, None, string_ctx, None):
-                text, source_info = self.visitString(string_ctx)
-                return (
-                    self._new(AST.AstString)
-                    .setup(source_info=source_info, text=text)
-                    ._is_assignable.get()
-                )
-            case (None, None, None, None, boolean_ctx):
-                return self.visitBoolean_(boolean_ctx)._is_assignable.get()
-            case _:
-                raise ValueError(f"Unexpected assignable: {ctx.getText()}")
+            return arith_result.as_assignable.get()
+
+        if (string_ctx := ctx.string()) is not None:
+            text, source_info = self.visitString(string_ctx)
+            return (
+                self._new(AST.AstString)
+                .setup(source_info=source_info, text=text)
+                ._is_assignable.get()
+            )
+
+        if (boolean_ctx := ctx.boolean_()) is not None:
+            return self.visitBoolean_(boolean_ctx)._is_assignable.get()
+
+        raise UserSyntaxError.from_ctx(
+            ctx,
+            "Expected an assignable expression",
+        )
 
     def visitNew_stmt(self, ctx: AtoParser.New_stmtContext) -> AST.NewExpression:
         template_data = (

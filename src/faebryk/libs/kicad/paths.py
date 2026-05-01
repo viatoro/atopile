@@ -61,7 +61,8 @@ def find_pcbnew() -> Path:
     else:
         raise NotImplementedError(f"Unsupported platform: {sys.platform}")
 
-    if path := list(base.glob("**/pcbnew")):
+    exe_name = "pcbnew.exe" if sys.platform.startswith("win") else "pcbnew"
+    if path := list(base.glob(f"**/{exe_name}")):
         # TODO: find the best version
         return path[0]
 

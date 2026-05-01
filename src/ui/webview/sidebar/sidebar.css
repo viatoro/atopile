@@ -1,0 +1,134 @@
+/* ============================================
+   Sidebar layout
+   ============================================ */
+
+.sidebar {
+  --sidebar-section-header-height: 44px;
+  --vscode-focusBorder: var(--ato-orange);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  padding: 0;
+  background: var(--bg-primary);
+}
+
+/* Top section: project/target selectors + action bar — fixed at top
+   Matches mainline .projects-section-fixed */
+.sidebar-top {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 8px 8px;
+  margin-bottom: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 84%, transparent);
+  background: transparent;
+}
+
+/* Tab content area: scrollable panel between tab bar and build queue */
+.sidebar-tab-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.sidebar-tab-content-fixed {
+  overflow: hidden;
+}
+
+.sidebar-tab-content-detail {
+  background: var(--bg-primary);
+}
+
+.sidebar-status {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  padding: var(--spacing-md) 8px;
+}
+
+.sidebar-migration-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--ato-orange) 22%, transparent);
+  border-radius: calc(var(--radius-md) + 2px);
+  background:
+    radial-gradient(circle at left center, color-mix(in srgb, var(--ato-orange-subtle) 98%, transparent) 0%, transparent 52%),
+    var(--bg-elevated);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.sidebar-migration-banner:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--ato-orange) 32%, transparent);
+  box-shadow: 0 12px 24px color-mix(in srgb, var(--ato-orange-glow) 46%, transparent);
+}
+
+.sidebar-migration-banner-eyebrow {
+  font-size: var(--font-size-xxs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ato-orange);
+}
+
+.sidebar-migration-banner-copy {
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+/* Disconnected Overlay — positioned below header so settings remain accessible */
+.disconnected-overlay {
+  position: absolute;
+  top: var(--sidebar-section-header-height);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-lg);
+  background: var(--bg-primary);
+  opacity: 0.95;
+}
+
+.disconnected-overlay .alert {
+  width: min(100%, 820px);
+  max-height: 100%;
+  overflow: auto;
+}
+
+.startup-traceback {
+  margin-top: var(--spacing-xs);
+}
+
+.open-settings-button {
+  margin-top: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--text-on-accent);
+  background: var(--accent-primary);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.open-settings-button:hover {
+  opacity: 0.9;
+}

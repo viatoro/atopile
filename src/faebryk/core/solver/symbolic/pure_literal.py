@@ -48,6 +48,7 @@ _CanonicalExpressions: dict[type[fabll.NodeT], _Multi | None] = {
     F.Expressions.Round: _Multi(F.Literals.Numbers.op_round),
     F.Expressions.Abs: _Multi(F.Literals.Numbers.op_abs),
     F.Expressions.Sin: _Multi(F.Literals.Numbers.op_sin),
+    F.Expressions.Cos: _Multi(F.Literals.Numbers.op_cos),
     F.Expressions.Log: _Multi(F.Literals.Numbers.op_log),
     F.Expressions.Floor: _Multi(F.Literals.Numbers.op_floor),
     F.Expressions.Ceil: _Multi(F.Literals.Numbers.op_ceil),
@@ -62,6 +63,13 @@ _CanonicalExpressions: dict[type[fabll.NodeT], _Multi | None] = {
     F.Expressions.GreaterThan: _Multi(F.Literals.Numbers.op_greater_than),
     F.Expressions.Is: _Multi(F.Literals.is_literal.op_setic_equals),
     F.Expressions.IsSubset: _Multi(F.Literals.is_literal.op_setic_is_subset_of),
+    F.Expressions.IsSuperset: _Multi(
+        lambda left, right, *, g, tg: left.op_setic_is_superset_of(
+            right,
+            g=g,
+            tg=tg,
+        )
+    ),
     F.Expressions.IsBitSet: _Multi(F.Literals.Numbers.op_is_bit_set),
     F.Expressions.Anticorrelated: None,
 }
@@ -107,7 +115,7 @@ def exec_pure_literal_operands(
     lits_nodes = [o.switch_cast() for o in lits]
     try:
         return expr_type_.run(g=g, tg=tg, *lits_nodes)
-    except (ValueError, NotImplementedError, ZeroDivisionError, TypeError):
+    except ValueError, NotImplementedError, ZeroDivisionError, TypeError:
         return None
 
 

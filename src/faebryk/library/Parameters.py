@@ -8,7 +8,7 @@ import faebryk.core.faebrykpy as fbrk
 import faebryk.core.graph as graph
 import faebryk.core.node as fabll
 import faebryk.library._F as F
-from faebryk.libs.util import KeyErrorAmbiguous, not_none, once
+from faebryk.libs.util import KeyErrorAmbiguous, not_none
 
 if TYPE_CHECKING:
     import faebryk.library.Literals as Literals
@@ -312,7 +312,11 @@ class is_parameter_operatable(fabll.Node):
         superset: bool,
         lit_type: type[T] | None = None,
     ) -> T | None:
+        from atopile.errors import UserIncompatibleUnitError
         from faebryk.library.Expressions import IsSubset, IsSuperset
+        from faebryk.library.Literals import (
+            UnitsNotCommensurableError as LiteralUnitsNotCommensurableError,
+        )
         from faebryk.library.Literals import is_literal
 
         # Follow alias to representative parameter for set extraction
@@ -322,6 +326,8 @@ class is_parameter_operatable(fabll.Node):
         l_op, r_op = (IsSubset, IsSuperset) if superset else (IsSuperset, IsSubset)
 
         lits = []
+        exprs: list["F.Expressions.is_expression"] = []
+
         for expr in target.get_operations(types=l_op, predicates_only=True):
             ops = expr.is_expression.get().get_operands()
             if not ops[0].is_same(target_op):
@@ -329,19 +335,39 @@ class is_parameter_operatable(fabll.Node):
             for op in ops[1:]:
                 if lit := op.as_literal.try_get():
                     lits.append(lit)
+                    exprs.append(expr.is_expression.get())
         for expr in target.get_operations(types=r_op, predicates_only=True):
             ops = expr.is_expression.get().get_operands()
             op = ops[0]
             if lit := op.as_literal.try_get():
                 lits.append(lit)
+                exprs.append(expr.is_expression.get())
 
         if not lits:
             return None
-        lit_merged = F.Literals.is_literal.op_setic_intersect(*lits)
+        try:
+            lit_merged = F.Literals.is_literal.op_setic_intersect(*lits)
+        except LiteralUnitsNotCommensurableError as ex:
+            raise UserIncompatibleUnitError.from_constraints(
+                ex.message,
+                parameters=[
+                    p
+                    for operatable in (self, target)
+                    if (p := operatable.as_parameter.try_get()) is not None
+                ],
+                constraints=[
+                    expr.is_expression.get()
+                    for expr in target.get_operations(types=l_op, predicates_only=True)
+                    | target.get_operations(types=r_op, predicates_only=True)
+                ],
+            ) from ex
 
         if lit_type is None or lit_type is is_literal:
             return cast(T, lit_merged)
-        return fabll.Traits(lit_merged).get_obj(lit_type)
+        # Use check=False because concrete enum types (from EnumsFactory)
+        # are _copy_type subtypes of AbstractEnums that don't match
+        # the base type in graph-level isinstance checks.
+        return fabll.Traits(lit_merged).get_obj_raw().cast(lit_type, check=False)
 
     # new
     def try_extract_superset[T: "Literals.LiteralNodes"](
@@ -372,15 +398,6 @@ class is_parameter_operatable(fabll.Node):
 
     def _get_lit_suffix(self) -> str:
         def format_lit(literal: "F.Literals.is_literal") -> str:
-            if param := self.as_parameter.try_get():
-                obj = fabll.Traits(param).get_obj_raw()
-                if numeric_param := obj.try_cast(NumericParameter):
-                    # Try to get the Numbers literal
-                    numbers_lit = (
-                        fabll.Traits(literal).get_obj_raw().try_cast(F.Literals.Numbers)
-                    )
-                    if numbers_lit:
-                        return numeric_param.format_literal_for_display(numbers_lit)
             return literal.pretty_str()
 
         try:
@@ -784,33 +801,6 @@ class NumericParameter(fabll.Node):
             return out.get_is_unit()
         return self.try_get_units()
 
-    def format_literal_for_display(
-        self,
-        lit: "Literals.Numbers",
-        show_tolerance: bool = True,
-        force_center: bool = False,
-    ) -> str:
-        """
-        Format a numeric literal for user-facing display (BOM, KiCad, variables).
-
-        Display-unit logic:
-        - NumericParameters have both `has_unit` (base SI unit for math, e.g.
-          Farad) and `has_display_unit` (preferred display unit, e.g. nF).
-        - Literals also carry their own `has_display_unit` when created by the
-          compiler from user source code (e.g. `220nF` → has_display_unit=nF).
-        - Literals deserialized from the parts API (via Numbers.deserialize())
-          intentionally do NOT get `has_display_unit` — only `has_unit` — so
-          that pretty_str() auto-scales with SI prefixes (220nF, 4.7uF, etc.).
-
-        By delegating directly to lit.pretty_str() we get the right behavior
-        for both cases:
-        - Picked parts (API literals, no has_display_unit): auto SI scaling
-          picks the most readable prefix (e.g. 220nF instead of 0.00000022F).
-        - User-defined literals (has_display_unit): the user's original unit
-          choice is preserved exactly as written (e.g. 5V stays 5V).
-        """
-        return lit.pretty_str(show_tolerance=show_tolerance, force_center=force_center)
-
     def get_values(self) -> list[float]:
         """
         Return values from extracted literal subset in the parameter's display units.
@@ -912,28 +902,6 @@ class NumericParameter(fabll.Node):
         out.add_dependant(fabll.Traits.MakeEdge(waits_for_unit.MakeChild(), [out]))
         return out
 
-    @staticmethod
-    @once
-    def _make_1_0_unit(basis_vector: "F.Units.BasisVector") -> type[fabll.Node]:
-        from faebryk.library.Units import is_unit, is_unit_type
-
-        is_unit_trait_child = is_unit.MakeChild(
-            symbols=(),
-            basis_vector=basis_vector,
-            multiplier=1.0,
-            offset=0.0,
-        )
-
-        class _BaseUnit(fabll.Node):
-            _override_type_identifier = f"BaseUnit<{basis_vector}>"
-            is_unit_type_trait = fabll.Traits.MakeEdge(
-                is_unit_type.MakeChild(())
-            ).put_on_type()
-            is_unit = fabll.Traits.MakeEdge(is_unit_trait_child)
-            can_be_operand_trait = fabll.Traits.MakeEdge(can_be_operand.MakeChild())
-
-        return _BaseUnit
-
     @classmethod
     def MakeChild(  # type: ignore[invalid-method-override]
         cls,
@@ -944,6 +912,7 @@ class NumericParameter(fabll.Node):
         from faebryk.library.Units import (
             Dimensionless,
             extract_unit_info,
+            find_base_unit_type,
             has_display_unit,
             has_unit,
         )
@@ -954,30 +923,29 @@ class NumericParameter(fabll.Node):
         out = fabll._ChildField(cls)
 
         if unit is not None:
-            # Create display unit from the provided type
-            display_unit_child = unit.MakeChild()
-            out.add_dependant(display_unit_child)
-            out.add_dependant(
-                fabll.Traits.MakeEdge(
-                    has_display_unit.MakeChild([display_unit_child]), [out]
-                )
-            )
-
             unit_info = extract_unit_info(unit)
             if unit_info.multiplier == 1.0 and unit_info.offset == 0.0:
-                # Base unit - use same child for has_unit
+                # Base unit - point to shared type-level is_unit (no copies)
                 out.add_dependant(
                     fabll.Traits.MakeEdge(
-                        has_unit.MakeChild([display_unit_child]), [out]
+                        has_display_unit.MakeChild_FromType(unit), [out]
                     )
                 )
-            else:
-                base_unit_child = NumericParameter._make_1_0_unit(
-                    unit_info.basis_vector
-                ).MakeChild()
-                out.add_dependant(base_unit_child)
                 out.add_dependant(
-                    fabll.Traits.MakeEdge(has_unit.MakeChild([base_unit_child]), [out])
+                    fabll.Traits.MakeEdge(has_unit.MakeChild_FromType(unit), [out])
+                )
+            else:
+                # Prefixed unit - point to type-level is_unit singletons
+                out.add_dependant(
+                    fabll.Traits.MakeEdge(
+                        has_display_unit.MakeChild_FromType(unit), [out]
+                    )
+                )
+                base_unit_type = find_base_unit_type(unit)
+                out.add_dependant(
+                    fabll.Traits.MakeEdge(
+                        has_unit.MakeChild_FromType(base_unit_type), [out]
+                    )
                 )
 
         if domain is not NumericParameter.DOMAIN_SKIP:
@@ -1079,11 +1047,8 @@ class NumericParameter(fabll.Node):
             param_unit = -1
             for operand_op in constraining_operands:
                 op_obj = operand_op.get_obj_raw()
-                operand_unit_node = resolve_unit_expression(
+                operand_unit = resolve_unit_expression(
                     g=param.g, tg=param.tg, expr=op_obj.instance
-                )
-                operand_unit = (
-                    operand_unit_node.get_is_unit() if operand_unit_node else None
                 )
                 if isinstance(param_unit, int) and param_unit == -1:
                     param_unit = operand_unit
@@ -1137,10 +1102,9 @@ class NumericParameter(fabll.Node):
             for operand in operands:
                 op_obj = operand.get_obj_raw()
                 try:
-                    unit_node = resolve_unit_expression(
+                    unit = resolve_unit_expression(
                         g=root.g, tg=root.tg, expr=op_obj.instance
                     )
-                    unit = unit_node.get_is_unit() if unit_node else None
                 except Exception:
                     # If we can't resolve the unit, skip this operand
                     unit = None
@@ -1450,7 +1414,7 @@ def test_new_definitions():
     parameters = BoundParameterContext(tg, g)
 
     parameters.NumericParameter.setup(
-        is_unit=Ohm.bind_typegraph(tg=tg).create_instance(g=g).is_unit.get(),
+        is_unit=Ohm.bind_typegraph(tg=tg).as_type_node().is_unit.get(),
     )
 
 
@@ -1622,9 +1586,7 @@ def test_expression_congruence():
 
     # Create literals context
     literals = BoundLiteralContext(tg=tg, g=g)
-    dimensionless = (
-        Dimensionless.bind_typegraph(tg=tg).create_instance(g=g).is_unit.get()
-    )
+    dimensionless = Dimensionless.bind_typegraph(tg=tg).as_type_node().is_unit.get()
 
     # Test singleton literal hash equality
     zero_lit_1 = literals.create_numbers_from_singleton(value=0.0, unit=dimensionless)
@@ -1779,7 +1741,7 @@ def test_can_be_operand_pretty_print():
 
     g = fabll.graph.GraphView.create()
     tg = fbrk.TypeGraph.create(g=g)
-    ohm_is_unit = Ohm.bind_typegraph(tg=tg).create_instance(g=g).is_unit.get()
+    ohm_is_unit = Ohm.bind_typegraph(tg=tg).as_type_node().is_unit.get()
 
     singleton = (
         F.Literals.Numbers.bind_typegraph(tg=tg)
@@ -1820,10 +1782,10 @@ def test_can_be_operand_pretty_print():
 
     assert singleton.can_be_operand.get().pretty() == "5Ω"
     assert discrete_set.can_be_operand.get().pretty() == "{1, 2, 3, 4}Ω"
-    assert continuous_set.can_be_operand.get().pretty() == "{5..10}Ω"
+    assert continuous_set.can_be_operand.get().pretty() == "5-10Ω"
     assert inf_set.can_be_operand.get().pretty() == "{ℝ}Ω"
-    assert continuous_set_rel.can_be_operand.get().pretty() == "5±0.5%Ω"
-    assert disjoint_union.can_be_operand.get().pretty() == "{5..10, 15..20}Ω"
+    assert continuous_set_rel.can_be_operand.get().pretty() == "5Ω ±0.5%"
+    assert disjoint_union.can_be_operand.get().pretty() == "{5-10Ω, 15-20Ω}"
 
 
 def test_is_discrete_set():
@@ -1831,7 +1793,7 @@ def test_is_discrete_set():
     tg = fbrk.TypeGraph.create(g=g)
     from faebryk.library.Units import Dimensionless
 
-    dl_is_unit = Dimensionless.bind_typegraph(tg=tg).create_instance(g=g).is_unit.get()
+    dl_is_unit = Dimensionless.bind_typegraph(tg=tg).as_type_node().is_unit.get()
     discrete_set = (
         F.Literals.Numbers.bind_typegraph(tg=tg)
         .create_instance(g=g)
@@ -1973,7 +1935,7 @@ def test_display_unit_normalization():
     tg = fbrk.TypeGraph.create(g=g)
 
     # Create a Volt instance to register it in the typegraph
-    _ = Volt.bind_typegraph(tg=tg).create_instance(g=g)
+    _ = Volt.bind_typegraph(tg=tg).as_type_node()
 
     # Get mV unit (millivolt) via decode_symbol_runtime
     mv_unit = decode_symbol_runtime(g=g, tg=tg, symbol="mV")
@@ -1997,6 +1959,54 @@ def test_display_unit_normalization():
     assert display_unit._extract_multiplier() == 0.001
 
 
+def test_try_extract_superset_reports_parameter_on_incommensurable_units():
+    from atopile.errors import UserIncompatibleUnitError
+    from faebryk.library.Expressions import IsSubset, IsSuperset
+    from faebryk.library.Literals import Numbers
+    from faebryk.library.Units import Volt
+
+    g = fabll.graph.GraphView.create()
+    tg = fbrk.TypeGraph.create(g=g)
+
+    class _TestModule(fabll.Node):
+        voltage = NumericParameter.MakeChild(unit=Volt)
+
+    module = _TestModule.bind_typegraph(tg=tg).create_instance(g=g)
+    voltage = module.voltage.get()
+
+    unitless_literal = (
+        Numbers.bind_typegraph(tg=tg)
+        .create_instance(g=g)
+        .setup_from_singleton(value=1.05, unit=None)
+    )
+    voltage.set_superset(g=g, value=unitless_literal)
+
+    with pytest.raises(UserIncompatibleUnitError) as ex:
+        voltage.try_extract_superset()
+
+    message = str(ex.value)
+    target = (
+        voltage.is_parameter_operatable.get()._canonical_operatable_for_set_extraction()
+    )
+    expected_constraints = {
+        expr.is_expression.get().compact_repr(
+            use_full_name=True,
+            no_lit_suffix=True,
+            no_class_suffix=True,
+        )
+        for expr in target.get_operations(types=IsSubset, predicates_only=True)
+        | target.get_operations(types=IsSuperset, predicates_only=True)
+    }
+
+    assert "Cannot intersect quantity sets: units are not commensurable" in message
+    assert "Conflicting units:" not in message
+    assert "Parameter:" in message
+    assert "Constraints involved:" in message
+    assert voltage.is_parameter.get().pretty_repr() in message
+    for expected_constraint in expected_constraints:
+        assert expected_constraint in message
+
+
 def test_display_unit_compact_repr():
     """
     Test that compact_repr shows the display unit.
@@ -2011,8 +2021,8 @@ def test_display_unit_compact_repr():
     tg = fbrk.TypeGraph.create(g=g)
 
     # Create a Volt instance
-    volt_instance = Volt.bind_typegraph(tg=tg).create_instance(g=g)
-    volt_unit = volt_instance.is_unit.get()
+    volt_type = Volt.bind_typegraph(tg=tg).as_type_node()
+    volt_unit = volt_type.is_unit.get()
 
     # Create a numeric parameter with V as display unit
     param = NumericParameter.bind_typegraph(tg=tg).create_instance(g=g)
@@ -2036,8 +2046,8 @@ def test_display_unit_literal_conversion():
     tg = fbrk.TypeGraph.create(g=g)
 
     # Create a Volt instance to register it
-    volt_instance = Volt.bind_typegraph(tg=tg).create_instance(g=g)
-    volt_unit = volt_instance.is_unit.get()
+    volt_type = Volt.bind_typegraph(tg=tg).as_type_node()
+    volt_unit = volt_type.is_unit.get()
 
     # Get mV unit
     mv_unit = decode_symbol_runtime(g=g, tg=tg, symbol="mV")
@@ -2052,7 +2062,7 @@ def test_display_unit_literal_conversion():
         .create_instance(g=g)
         .setup_from_min_max(min=4.0, max=5.0, unit=volt_unit)
     )
-    formatted = param.format_literal_for_display(user_literal)
+    formatted = user_literal.pretty_str()
     # User wrote V, so display preserves V
     assert "4" in formatted
     assert "5" in formatted
@@ -2068,7 +2078,7 @@ def test_display_unit_literal_conversion():
     fabll.Traits.create_and_add_instance_to(api_literal, has_unit).setup(
         is_unit=base_volt
     )
-    formatted = param.format_literal_for_display(api_literal)
+    formatted = api_literal.pretty_str()
     # No display unit → auto SI scale → shows V (4-5 is in the V range)
     assert "4" in formatted
     assert "5" in formatted
@@ -2082,8 +2092,8 @@ def test_display_unit_fallback():
     tg = fbrk.TypeGraph.create(g=g)
 
     # Create a Volt instance
-    volt_instance = Volt.bind_typegraph(tg=tg).create_instance(g=g)
-    volt_unit = volt_instance.is_unit.get()
+    volt_type = Volt.bind_typegraph(tg=tg).as_type_node()
+    volt_unit = volt_type.is_unit.get()
 
     # Create a numeric parameter with base unit (V)
     # When using base unit, has_unit and has_display_unit should be the same
@@ -2131,8 +2141,8 @@ def test_display_unit_lit_suffix_conversion():
     tg = fbrk.TypeGraph.create(g=g)
 
     # Create a Volt instance
-    volt_instance = Volt.bind_typegraph(tg=tg).create_instance(g=g)
-    volt_unit = volt_instance.is_unit.get()
+    volt_type = Volt.bind_typegraph(tg=tg).as_type_node()
+    volt_unit = volt_type.is_unit.get()
 
     # Get mV unit
     mv_unit = decode_symbol_runtime(g=g, tg=tg, symbol="mV")
